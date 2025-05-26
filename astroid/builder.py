@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 """The AstroidBuilder makes astroid from living object and / or from _ast.
 
@@ -12,10 +12,8 @@ from __future__ import annotations
 
 import ast
 import os
-import re
 import textwrap
 import types
-import warnings
 from collections.abc import Iterator, Sequence
 from io import TextIOWrapper
 from tokenize import detect_encoding
@@ -23,11 +21,14 @@ from typing import TYPE_CHECKING
 
 from astroid import bases, modutils, nodes, raw_building, rebuilder, util
 from astroid._ast import ParserModule, get_parser_module
-from astroid.const import PY312_PLUS
 from astroid.exceptions import AstroidBuildingError, AstroidSyntaxError, InferenceError
+from astroid.manager import AstroidManager
 
 if TYPE_CHECKING:
-    from astroid.manager import AstroidManager
+    from astroid import objects
+else:
+    objects = util.lazy_import("objects")
+
 
 # The name of the transient function that is used to
 # wrap expressions to be extracted when calling
@@ -37,9 +38,7 @@ _TRANSIENT_FUNCTION = "__"
 # The comment used to select a statement to be extracted
 # when calling extract_node.
 _STATEMENT_SELECTOR = "#@"
-
-if PY312_PLUS:
-    warnings.filterwarnings("ignore", "invalid escape sequence", SyntaxWarning)
+MISPLACED_TYPE_ANNOTATION_ERROR = "misplaced type annotation"
 
 
 def open_source_file(filename: str) -> tuple[TextIOWrapper, str, str]:
@@ -65,17 +64,18 @@ def _can_assign_attr(node: nodes.ClassDef, attrname: str | None) -> bool:
 class AstroidBuilder(raw_building.InspectBuilder):
     """Class for building an astroid tree from source code or from a live module.
 
-    The param *manager* specifies the manager class which should be used. The
+    The param *manager* specifies the manager class which should be used.
+    If no manager is given, then the default one will be used. The
     param *apply_transforms* determines if the transforms should be
     applied after the tree was built from source or from a live object,
     by default being True.
     """
 
-    def __init__(self, manager: AstroidManager, apply_transforms: bool = True) -> None:
+    def __init__(
+        self, manager: AstroidManager | None = None, apply_transforms: bool = True
+    ) -> None:
         super().__init__(manager)
         self._apply_transforms = apply_transforms
-        if not raw_building.InspectBuilder.bootstrapped:
-            manager.bootstrap()
 
     def module_build(
         self, module: types.ModuleType, modname: str | None = None
@@ -178,9 +178,7 @@ class AstroidBuilder(raw_building.InspectBuilder):
     ) -> tuple[nodes.Module, rebuilder.TreeRebuilder]:
         """Build tree node from data and add some informations."""
         try:
-            node, parser_module = _parse_string(
-                data, type_comments=True, modname=modname
-            )
+            node, parser_module = _parse_string(data, type_comments=True)
         except (TypeError, ValueError, SyntaxError) as exc:
             raise AstroidSyntaxError(
                 "Parsing Python code failed:\n{error}",
@@ -233,19 +231,22 @@ class AstroidBuilder(raw_building.InspectBuilder):
                 sort_locals(node.parent.scope().locals[asname or name])  # type: ignore[arg-type]
 
     def delayed_assattr(self, node: nodes.AssignAttr) -> None:
-        """Visit an AssignAttr node.
+        """Visit a AssAttr node.
 
         This adds name to locals and handle members definition.
         """
-        from astroid import objects  # pylint: disable=import-outside-toplevel
-
         try:
+            frame = node.frame(future=True)
             for inferred in node.expr.infer():
                 if isinstance(inferred, util.UninferableBase):
                     continue
                 try:
-                    # We want a narrow check on the parent type, not all of its subclasses
-                    if type(inferred) in {bases.Instance, objects.ExceptionInstance}:
+                    # pylint: disable=unidiomatic-typecheck # We want a narrow check on the
+                    # parent type, not all of its subclasses
+                    if (
+                        type(inferred) == bases.Instance
+                        or type(inferred) == objects.ExceptionInstance
+                    ):
                         inferred = inferred._proxied
                         iattrs = inferred.instance_attrs
                         if not _can_assign_attr(inferred, node.attrname):
@@ -266,15 +267,22 @@ class AstroidBuilder(raw_building.InspectBuilder):
                 values = iattrs.setdefault(node.attrname, [])
                 if node in values:
                     continue
-                values.append(node)
+                # get assign in __init__ first XXX useful ?
+                if (
+                    frame.name == "__init__"
+                    and values
+                    and values[0].frame(future=True).name != "__init__"
+                ):
+                    values.insert(0, node)
+                else:
+                    values.append(node)
         except InferenceError:
             pass
 
 
 def build_namespace_package_module(name: str, path: Sequence[str]) -> nodes.Module:
-    module = nodes.Module(name, path=path, package=True)
-    module.postinit(body=[], doc_node=None)
-    return module
+    # TODO: Typing: Remove the cast to list and just update typing to accept Sequence
+    return nodes.Module(name, path=list(path), package=True)
 
 
 def parse(
@@ -292,11 +300,10 @@ def parse(
         Apply the transforms for the give code. Use it if you
         don't want the default transforms to be applied.
     """
-    # pylint: disable-next=import-outside-toplevel
-    from astroid.manager import AstroidManager
-
     code = textwrap.dedent(code)
-    builder = AstroidBuilder(AstroidManager(), apply_transforms=apply_transforms)
+    builder = AstroidBuilder(
+        manager=AstroidManager(), apply_transforms=apply_transforms
+    )
     return builder.string_build(code, modname=module_name, path=path)
 
 
@@ -317,7 +324,6 @@ def _extract_expressions(node: nodes.NodeNG) -> Iterator[nodes.NodeNG]:
         isinstance(node, nodes.Call)
         and isinstance(node.func, nodes.Name)
         and node.func.name == _TRANSIENT_FUNCTION
-        and node.args
     ):
         real_expr = node.args[0]
         assert node.parent
@@ -471,20 +477,16 @@ def _extract_single_node(code: str, module_name: str = "") -> nodes.NodeNG:
 
 
 def _parse_string(
-    data: str, type_comments: bool = True, modname: str | None = None
+    data: str, type_comments: bool = True
 ) -> tuple[ast.Module, ParserModule]:
     parser_module = get_parser_module(type_comments=type_comments)
     try:
-        parsed = parser_module.parse(
-            data + "\n", type_comments=type_comments, filename=modname
-        )
+        parsed = parser_module.parse(data + "\n", type_comments=type_comments)
     except SyntaxError as exc:
         # If the type annotations are misplaced for some reason, we do not want
-        # to fail the entire parsing of the file, so we need to retry the
-        # parsing without type comment support. We use a heuristic for
-        # determining if the error is due to type annotations.
-        type_annot_related = re.search(r"#\s+type:", exc.text or "")
-        if not (type_annot_related and type_comments):
+        # to fail the entire parsing of the file, so we need to retry the parsing without
+        # type comment support.
+        if exc.args[0] != MISPLACED_TYPE_ANNOTATION_ERROR or not type_comments:
             raise
 
         parser_module = get_parser_module(type_comments=False)

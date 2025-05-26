@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 from __future__ import annotations
 
@@ -13,16 +13,20 @@ import os
 import pathlib
 import sys
 import types
-import warnings
 import zipimport
-from collections.abc import Iterable, Iterator, Sequence
-from functools import lru_cache
+from collections.abc import Iterator, Sequence
 from pathlib import Path
-from typing import Literal, NamedTuple, Protocol
+from typing import Any, NamedTuple
 
 from astroid.const import PY310_PLUS
+from astroid.modutils import EXT_LIB_DIRS
 
 from . import util
+
+if sys.version_info >= (3, 8):
+    from typing import Literal, Protocol
+else:
+    from typing_extensions import Literal, Protocol
 
 
 # The MetaPathFinder protocol comes from typeshed, which says:
@@ -33,7 +37,8 @@ class _MetaPathFinder(Protocol):
         fullname: str,
         path: Sequence[str] | None,
         target: types.ModuleType | None = ...,
-    ) -> importlib.machinery.ModuleSpec | None: ...  # pragma: no cover
+    ) -> importlib.machinery.ModuleSpec | None:
+        ...  # pragma: no cover
 
 
 class ModuleType(enum.Enum):
@@ -59,11 +64,6 @@ _MetaPathFinderModuleTypes: dict[str, ModuleType] = {
     "_SixMetaPathImporter": ModuleType.PY_SOURCE,
 }
 
-_EditableFinderClasses: set[str] = {
-    "_EditableFinder",
-    "_EditableNamespaceFinder",
-}
-
 
 class ModuleSpec(NamedTuple):
     """Defines a class similar to PEP 420's ModuleSpec.
@@ -85,13 +85,13 @@ class Finder:
     def __init__(self, path: Sequence[str] | None = None) -> None:
         self._path = path or sys.path
 
-    @staticmethod
     @abc.abstractmethod
     def find_module(
+        self,
         modname: str,
-        module_parts: tuple[str, ...],
-        processed: tuple[str, ...],
-        submodule_path: tuple[str, ...] | None,
+        module_parts: Sequence[str],
+        processed: list[str],
+        submodule_path: Sequence[str] | None,
     ) -> ModuleSpec | None:
         """Find the given module.
 
@@ -99,12 +99,12 @@ class Finder:
         they all return a ModuleSpec.
 
         :param modname: The module which needs to be searched.
-        :param module_parts: It should be a tuple of strings,
+        :param module_parts: It should be a list of strings,
                                   where each part contributes to the module's
                                   namespace.
         :param processed: What parts from the module parts were processed
                                so far.
-        :param submodule_path: A tuple of paths where the module
+        :param submodule_path: A list of paths where the module
                                     can be looked into.
         :returns: A ModuleSpec, describing how and where the module was found,
                   None, otherwise.
@@ -125,38 +125,45 @@ class ImportlibFinder(Finder):
         + [(s, ModuleType.PY_COMPILED) for s in importlib.machinery.BYTECODE_SUFFIXES]
     )
 
-    @staticmethod
-    @lru_cache(maxsize=1024)
     def find_module(
+        self,
         modname: str,
-        module_parts: tuple[str, ...],
-        processed: tuple[str, ...],
-        submodule_path: tuple[str, ...] | None,
+        module_parts: Sequence[str],
+        processed: list[str],
+        submodule_path: Sequence[str] | None,
     ) -> ModuleSpec | None:
-        # pylint: disable-next=import-outside-toplevel
-        from astroid.modutils import cached_os_path_isfile
-
-        # Although we should be able to use `find_spec` this doesn't work on PyPy for builtins.
-        # Therefore, we use the `builtin_module_nams` heuristic for these.
-        if submodule_path is None and modname in sys.builtin_module_names:
+        if submodule_path is not None:
+            submodule_path = list(submodule_path)
+        elif modname in sys.builtin_module_names:
             return ModuleSpec(
                 name=modname,
                 location=None,
                 type=ModuleType.C_BUILTIN,
             )
-
-        if submodule_path is not None:
-            search_paths = list(submodule_path)
         else:
-            search_paths = sys.path
+            try:
+                spec = importlib.util.find_spec(modname)
+                if (
+                    spec
+                    and spec.loader  # type: ignore[comparison-overlap] # noqa: E501
+                    is importlib.machinery.FrozenImporter
+                ):
+                    # No need for BuiltinImporter; builtins handled above
+                    return ModuleSpec(
+                        name=modname,
+                        location=getattr(spec.loader_state, "filename", None),
+                        type=ModuleType.PY_FROZEN,
+                    )
+            except ValueError:
+                pass
+            submodule_path = sys.path
 
-        suffixes = (".py", ".pyi", importlib.machinery.BYTECODE_SUFFIXES[0])
-        for entry in search_paths:
+        for entry in submodule_path:
             package_directory = os.path.join(entry, modname)
-            for suffix in suffixes:
+            for suffix in (".py", importlib.machinery.BYTECODE_SUFFIXES[0]):
                 package_file_name = "__init__" + suffix
                 file_path = os.path.join(package_directory, package_file_name)
-                if cached_os_path_isfile(file_path):
+                if os.path.isfile(file_path):
                     return ModuleSpec(
                         name=modname,
                         location=package_directory,
@@ -165,60 +172,8 @@ class ImportlibFinder(Finder):
             for suffix, type_ in ImportlibFinder._SUFFIXES:
                 file_name = modname + suffix
                 file_path = os.path.join(entry, file_name)
-                if cached_os_path_isfile(file_path):
+                if os.path.isfile(file_path):
                     return ModuleSpec(name=modname, location=file_path, type=type_)
-
-        # sys.stdlib_module_names was added in Python 3.10
-        if PY310_PLUS:
-            # If the module name matches a stdlib module name, check whether this is a frozen
-            # module. Note that `find_spec` actually imports parent modules, so we want to make
-            # sure we only run this code for stuff that can be expected to be frozen. For now
-            # this is only stdlib.
-            if (modname in sys.stdlib_module_names and not processed) or (
-                processed and processed[0] in sys.stdlib_module_names
-            ):
-                try:
-                    with warnings.catch_warnings():
-                        warnings.filterwarnings("ignore", category=Warning)
-                        spec = importlib.util.find_spec(".".join((*processed, modname)))
-                except ValueError:
-                    spec = None
-
-                if (
-                    spec
-                    and spec.loader  # type: ignore[comparison-overlap] # noqa: E501
-                    is importlib.machinery.FrozenImporter
-                ):
-                    return ModuleSpec(
-                        name=modname,
-                        location=getattr(spec.loader_state, "filename", None),
-                        type=ModuleType.PY_FROZEN,
-                    )
-        else:
-            # NOTE: This is broken code. It doesn't work on Python 3.13+ where submodules can also
-            # be frozen. However, we don't want to worry about this and we don't want to break
-            # support for older versions of Python. This is just copy-pasted from the old non
-            # working version to at least have no functional behaviour change on <=3.10.
-            # It can be removed after 3.10 is no longer supported in favour of the logic above.
-            if submodule_path is None:  # pylint: disable=else-if-used
-                try:
-                    with warnings.catch_warnings():
-                        warnings.filterwarnings("ignore", category=UserWarning)
-                        spec = importlib.util.find_spec(modname)
-                    if (
-                        spec
-                        and spec.loader  # type: ignore[comparison-overlap] # noqa: E501
-                        is importlib.machinery.FrozenImporter
-                    ):
-                        # No need for BuiltinImporter; builtins handled above
-                        return ModuleSpec(
-                            name=modname,
-                            location=getattr(spec.loader_state, "filename", None),
-                            type=ModuleType.PY_FROZEN,
-                        )
-                except ValueError:
-                    pass
-
         return None
 
     def contribute_to_path(
@@ -227,8 +182,6 @@ class ImportlibFinder(Finder):
         if spec.location is None:
             # Builtin.
             return None
-        # pylint: disable-next=import-outside-toplevel
-        from astroid.modutils import EXT_LIB_DIRS
 
         if _is_setuptools_namespace(Path(spec.location)):
             # extend_path is called, search sys.path for module/packages
@@ -245,7 +198,7 @@ class ImportlibFinder(Finder):
             # virtualenv below 20.0 patches distutils in an unexpected way
             # so we just find the location of distutils that will be
             # imported to avoid spurious import-error messages
-            # https://github.com/pylint-dev/pylint/issues/5645
+            # https://github.com/PyCQA/pylint/issues/5645
             # A regression test to create this scenario exists in release-tests.yml
             # and can be triggered manually from GitHub Actions
             distutils_spec = importlib.util.find_spec("distutils")
@@ -264,23 +217,23 @@ class ImportlibFinder(Finder):
 class ExplicitNamespacePackageFinder(ImportlibFinder):
     """A finder for the explicit namespace packages."""
 
-    @staticmethod
-    @lru_cache(maxsize=1024)
     def find_module(
+        self,
         modname: str,
-        module_parts: tuple[str, ...],
-        processed: tuple[str, ...],
-        submodule_path: tuple[str, ...] | None,
+        module_parts: Sequence[str],
+        processed: list[str],
+        submodule_path: Sequence[str] | None,
     ) -> ModuleSpec | None:
         if processed:
-            modname = ".".join([*processed, modname])
+            modname = ".".join(processed + [modname])
         if util.is_namespace(modname) and modname in sys.modules:
+            submodule_path = sys.modules[modname].__path__
             return ModuleSpec(
                 name=modname,
                 location="",
                 origin="namespace",
                 type=ModuleType.PY_NAMESPACE,
-                submodule_search_locations=sys.modules[modname].__path__,
+                submodule_search_locations=submodule_path,
             )
         return None
 
@@ -304,13 +257,12 @@ class ZipFinder(Finder):
                 except zipimport.ZipImportError:
                     continue
 
-    @staticmethod
-    @lru_cache(maxsize=1024)
     def find_module(
+        self,
         modname: str,
-        module_parts: tuple[str, ...],
-        processed: tuple[str, ...],
-        submodule_path: tuple[str, ...] | None,
+        module_parts: Sequence[str],
+        processed: list[str],
+        submodule_path: Sequence[str] | None,
     ) -> ModuleSpec | None:
         try:
             file_type, filename, path = _search_zip(module_parts)
@@ -329,13 +281,12 @@ class ZipFinder(Finder):
 class PathSpecFinder(Finder):
     """Finder based on importlib.machinery.PathFinder."""
 
-    @staticmethod
-    @lru_cache(maxsize=1024)
     def find_module(
+        self,
         modname: str,
-        module_parts: tuple[str, ...],
-        processed: tuple[str, ...],
-        submodule_path: tuple[str, ...] | None,
+        module_parts: Sequence[str],
+        processed: list[str],
+        submodule_path: Sequence[str] | None,
     ) -> ModuleSpec | None:
         spec = importlib.machinery.PathFinder.find_spec(modname, path=submodule_path)
         if spec is not None:
@@ -367,7 +318,6 @@ _SPEC_FINDERS = (
 )
 
 
-@lru_cache(maxsize=1024)
 def _is_setuptools_namespace(location: pathlib.Path) -> bool:
     try:
         with open(location / "__init__.py", "rb") as stream:
@@ -383,31 +333,29 @@ def _is_setuptools_namespace(location: pathlib.Path) -> bool:
 
 def _get_zipimporters() -> Iterator[tuple[str, zipimport.zipimporter]]:
     for filepath, importer in sys.path_importer_cache.items():
-        if importer is not None and isinstance(importer, zipimport.zipimporter):
+        if isinstance(importer, zipimport.zipimporter):
             yield filepath, importer
 
 
 def _search_zip(
-    modpath: tuple[str, ...],
+    modpath: Sequence[str],
 ) -> tuple[Literal[ModuleType.PY_ZIPMODULE], str, str]:
     for filepath, importer in _get_zipimporters():
         if PY310_PLUS:
-            found = importer.find_spec(modpath[0])
+            found: Any = importer.find_spec(modpath[0])
         else:
             found = importer.find_module(modpath[0])
         if found:
             if PY310_PLUS:
                 if not importer.find_spec(os.path.sep.join(modpath)):
                     raise ImportError(
-                        "No module named {} in {}/{}".format(
-                            ".".join(modpath[1:]), filepath, modpath
-                        )
+                        "No module named %s in %s/%s"
+                        % (".".join(modpath[1:]), filepath, modpath)
                     )
             elif not importer.find_module(os.path.sep.join(modpath)):
                 raise ImportError(
-                    "No module named {} in {}/{}".format(
-                        ".".join(modpath[1:]), filepath, modpath
-                    )
+                    "No module named %s in %s/%s"
+                    % (".".join(modpath[1:]), filepath, modpath)
                 )
             return (
                 ModuleType.PY_ZIPMODULE,
@@ -420,16 +368,18 @@ def _search_zip(
 def _find_spec_with_path(
     search_path: Sequence[str],
     modname: str,
-    module_parts: tuple[str, ...],
-    processed: tuple[str, ...],
-    submodule_path: tuple[str, ...] | None,
+    module_parts: list[str],
+    processed: list[str],
+    submodule_path: Sequence[str] | None,
 ) -> tuple[Finder | _MetaPathFinder, ModuleSpec]:
     for finder in _SPEC_FINDERS:
         finder_instance = finder(search_path)
-        mod_spec = finder.find_module(modname, module_parts, processed, submodule_path)
-        if mod_spec is None:
+        spec = finder_instance.find_module(
+            modname, module_parts, processed, submodule_path
+        )
+        if spec is None:
             continue
-        return finder_instance, mod_spec
+        return finder_instance, spec
 
     # Support for custom finders
     for meta_finder in sys.meta_path:
@@ -440,7 +390,7 @@ def _find_spec_with_path(
             # "type" as their __class__.__name__. We check __name__ as well
             # to see if we can support the finder.
             try:
-                meta_finder_name = meta_finder.__name__  # type: ignore[attr-defined]
+                meta_finder_name = meta_finder.__name__
             except AttributeError:
                 continue
             if meta_finder_name not in _MetaPathFinderModuleTypes:
@@ -451,7 +401,7 @@ def _find_spec_with_path(
         # Meta path finders are supposed to have a find_spec method since
         # Python 3.4. However, some third-party finders do not implement it.
         # PEP302 does not refer to find_spec as well.
-        # See: https://github.com/pylint-dev/astroid/pull/1752/
+        # See: https://github.com/PyCQA/astroid/pull/1752/
         if not hasattr(meta_finder, "find_spec"):
             continue
 
@@ -471,7 +421,7 @@ def _find_spec_with_path(
     raise ImportError(f"No module named {'.'.join(module_parts)}")
 
 
-def find_spec(modpath: Iterable[str], path: Iterable[str] | None = None) -> ModuleSpec:
+def find_spec(modpath: list[str], path: Sequence[str] | None = None) -> ModuleSpec:
     """Find a spec for the given module.
 
     :type modpath: list or tuple
@@ -488,42 +438,25 @@ def find_spec(modpath: Iterable[str], path: Iterable[str] | None = None) -> Modu
     :return: A module spec, which describes how the module was
              found and where.
     """
-    return _find_spec(tuple(modpath), tuple(path) if path else None)
-
-
-@lru_cache(maxsize=1024)
-def _find_spec(
-    module_path: tuple[str, ...], path: tuple[str, ...] | None
-) -> ModuleSpec:
     _path = path or sys.path
 
     # Need a copy for not mutating the argument.
-    modpath = list(module_path)
+    modpath = modpath[:]
 
-    search_paths = None
+    submodule_path = None
+    module_parts = modpath[:]
     processed: list[str] = []
 
     while modpath:
         modname = modpath.pop(0)
-
-        submodule_path = search_paths or path
-        if submodule_path is not None:
-            submodule_path = tuple(submodule_path)
-
         finder, spec = _find_spec_with_path(
-            _path, modname, module_path, tuple(processed), submodule_path
+            _path, modname, module_parts, processed, submodule_path or path
         )
         processed.append(modname)
-        if modpath:
-            if isinstance(finder, Finder):
-                search_paths = finder.contribute_to_path(spec, processed)
-            # If modname is a package from an editable install, update search_paths
-            # so that the next module in the path will be found inside of it using importlib.
-            # Existence of __name__ is guaranteed by _find_spec_with_path.
-            elif finder.__name__ in _EditableFinderClasses:  # type: ignore[attr-defined]
-                search_paths = spec.submodule_search_locations
+        if modpath and isinstance(finder, Finder):
+            submodule_path = finder.contribute_to_path(spec, processed)
 
         if spec.type == ModuleType.PKG_DIRECTORY:
-            spec = spec._replace(submodule_search_locations=search_paths)
+            spec = spec._replace(submodule_search_locations=submodule_path)
 
     return spec

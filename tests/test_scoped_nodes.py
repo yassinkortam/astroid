@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 """Tests for specific behaviour of astroid scoped nodes (i.e. module, class and
 function).
@@ -8,14 +8,14 @@ function).
 
 from __future__ import annotations
 
-import difflib
+import datetime
 import os
 import sys
 import textwrap
 import unittest
+import warnings
 from functools import partial
 from typing import Any
-from unittest.mock import patch
 
 import pytest
 
@@ -26,12 +26,12 @@ from astroid import (
     nodes,
     objects,
     parse,
+    test_utils,
     util,
 )
 from astroid.bases import BoundMethod, Generator, Instance, UnboundMethod
-from astroid.const import WIN32
+from astroid.const import IS_PYPY, PY38, PY38_PLUS
 from astroid.exceptions import (
-    AstroidBuildingError,
     AttributeInferenceError,
     DuplicateBasesError,
     InconsistentMroError,
@@ -42,13 +42,12 @@ from astroid.exceptions import (
     ResolveError,
     TooManyLevelsError,
 )
-from astroid.manager import AstroidManager
 from astroid.nodes.scoped_nodes.scoped_nodes import _is_metaclass
 
 from . import resources
 
 try:
-    import six  # type: ignore[import]  # pylint: disable=unused-import
+    import six  # pylint: disable=unused-import
 
     HAS_SIX = True
 except ImportError:
@@ -79,11 +78,9 @@ class ModuleLoader(resources.SysPathSetup):
 
 class ModuleNodeTest(ModuleLoader, unittest.TestCase):
     def test_special_attributes(self) -> None:
-        self.assertEqual(len(self.module.getattr("__name__")), 2)
+        self.assertEqual(len(self.module.getattr("__name__")), 1)
         self.assertIsInstance(self.module.getattr("__name__")[0], nodes.Const)
         self.assertEqual(self.module.getattr("__name__")[0].value, "data.module")
-        self.assertIsInstance(self.module.getattr("__name__")[1], nodes.Const)
-        self.assertEqual(self.module.getattr("__name__")[1].value, "__main__")
         self.assertEqual(len(self.module.getattr("__doc__")), 1)
         self.assertIsInstance(self.module.getattr("__doc__")[0], nodes.Const)
         self.assertEqual(
@@ -248,19 +245,6 @@ class ModuleNodeTest(ModuleLoader, unittest.TestCase):
         finally:
             del sys.path[0]
 
-    @patch(
-        "astroid.nodes.scoped_nodes.scoped_nodes.AstroidManager.ast_from_module_name"
-    )
-    def test_import_unavailable_module(self, mock) -> None:
-        unavailable_modname = "posixpath" if WIN32 else "ntpath"
-        module = builder.parse(f"import {unavailable_modname}")
-        mock.side_effect = AstroidBuildingError
-
-        with pytest.raises(AstroidBuildingError):
-            module.import_module(unavailable_modname)
-
-        mock.assert_called_once()
-
     def test_file_stream_in_memory(self) -> None:
         data = """irrelevant_variable is irrelevant"""
         astroid = builder.parse(data, "in_memory")
@@ -269,21 +253,21 @@ class ModuleNodeTest(ModuleLoader, unittest.TestCase):
 
     def test_file_stream_physical(self) -> None:
         path = resources.find("data/all.py")
-        astroid = builder.AstroidBuilder(AstroidManager()).file_build(path, "all")
+        astroid = builder.AstroidBuilder().file_build(path, "all")
         with open(path, "rb") as file_io:
             with astroid.stream() as stream:
                 self.assertEqual(stream.read(), file_io.read())
 
     def test_file_stream_api(self) -> None:
         path = resources.find("data/all.py")
-        file_build = builder.AstroidBuilder(AstroidManager()).file_build(path, "all")
+        file_build = builder.AstroidBuilder().file_build(path, "all")
         with self.assertRaises(AttributeError):
             # pylint: disable=pointless-statement, no-member
-            file_build.file_stream  # noqa: B018
+            file_build.file_stream
 
     def test_stream_api(self) -> None:
         path = resources.find("data/all.py")
-        astroid = builder.AstroidBuilder(AstroidManager()).file_build(path, "all")
+        astroid = builder.AstroidBuilder().file_build(path, "all")
         stream = astroid.stream()
         self.assertTrue(hasattr(stream, "close"))
         with stream:
@@ -385,7 +369,7 @@ class FunctionNodeTest(ModuleLoader, unittest.TestCase):
     def test_navigation(self) -> None:
         function = self.module["global_access"]
         self.assertEqual(function.statement(), function)
-        self.assertEqual(function.statement(), function)
+        self.assertEqual(function.statement(future=True), function)
         l_sibling = function.previous_sibling()
         # check taking parent if child is not a stmt
         self.assertIsInstance(l_sibling, nodes.Assign)
@@ -496,7 +480,7 @@ class FunctionNodeTest(ModuleLoader, unittest.TestCase):
                 g = lambda: None
         """
         astroid = builder.parse(data)
-        g = next(iter(astroid["f"].ilookup("g")))
+        g = list(astroid["f"].ilookup("g"))[0]
         self.assertEqual(g.pytype(), "builtins.function")
 
     def test_lambda_qname(self) -> None:
@@ -546,10 +530,7 @@ class FunctionNodeTest(ModuleLoader, unittest.TestCase):
             astroid["f"].argnames(), ["a", "b", "args", "c", "d", "kwargs"]
         )
 
-    def test_argnames_lambda(self) -> None:
-        lambda_node = extract_node("lambda a, b, c, *args, **kwargs: ...")
-        self.assertEqual(lambda_node.argnames(), ["a", "b", "c", "args", "kwargs"])
-
+    @unittest.skipUnless(PY38_PLUS, "positional-only argument syntax")
     def test_positional_only_argnames(self) -> None:
         code = "def f(a, b, /, c=None, *args, d, **kwargs): pass"
         astroid = builder.parse(code, __name__)
@@ -949,39 +930,6 @@ class FunctionNodeTest(ModuleLoader, unittest.TestCase):
         func: nodes.FunctionDef = builder.extract_node(code)  # type: ignore[assignment]
         assert func.doc_node is None
 
-    @staticmethod
-    def test_display_type() -> None:
-        code = textwrap.dedent(
-            """\
-            def foo():
-                bar = 1
-        """
-        )
-        func: nodes.FunctionDef = builder.extract_node(code)  # type: ignore[assignment]
-        assert func.display_type() == "Function"
-
-        code = textwrap.dedent(
-            """\
-            class A:
-                def foo(self):  #@
-                    bar = 1
-        """
-        )
-        func: nodes.FunctionDef = builder.extract_node(code)  # type: ignore[assignment]
-        assert func.display_type() == "Method"
-
-    @staticmethod
-    def test_inference_error() -> None:
-        code = textwrap.dedent(
-            """\
-            def foo():
-                bar = 1
-        """
-        )
-        func: nodes.FunctionDef = builder.extract_node(code)  # type: ignore[assignment]
-        with pytest.raises(AttributeInferenceError):
-            func.getattr("")
-
 
 class ClassNodeTest(ModuleLoader, unittest.TestCase):
     def test_dict_interface(self) -> None:
@@ -1003,13 +951,17 @@ class ClassNodeTest(ModuleLoader, unittest.TestCase):
         self.assertIsInstance(cls.getattr("__module__")[0], nodes.Const)
         self.assertEqual(cls.getattr("__module__")[0].value, "data.module")
         self.assertEqual(len(cls.getattr("__dict__")), 1)
-
+        if not cls.newstyle:
+            self.assertRaises(AttributeInferenceError, cls.getattr, "__mro__")
         for cls in (nodes.List._proxied, nodes.Const(1)._proxied):
             self.assertEqual(len(cls.getattr("__bases__")), 1)
             self.assertEqual(len(cls.getattr("__name__")), 1)
             self.assertEqual(
                 len(cls.getattr("__doc__")), 1, (cls, cls.getattr("__doc__"))
             )
+            with pytest.warns(DeprecationWarning) as records:
+                self.assertEqual(cls.getattr("__doc__")[0].value, cls.doc)
+                assert len(records) == 1
             self.assertEqual(cls.getattr("__doc__")[0].value, cls.doc_node.value)
             self.assertEqual(len(cls.getattr("__module__")), 4)
             self.assertEqual(len(cls.getattr("__dict__")), 1)
@@ -1069,7 +1021,7 @@ class ClassNodeTest(ModuleLoader, unittest.TestCase):
     def test_navigation(self) -> None:
         klass = self.module["YO"]
         self.assertEqual(klass.statement(), klass)
-        self.assertEqual(klass.statement(), klass)
+        self.assertEqual(klass.statement(future=True), klass)
         l_sibling = klass.previous_sibling()
         self.assertTrue(isinstance(l_sibling, nodes.FunctionDef), l_sibling)
         self.assertEqual(l_sibling.name, "global_access")
@@ -1209,7 +1161,6 @@ class ClassNodeTest(ModuleLoader, unittest.TestCase):
         astroid = builder.parse(data, __name__)
         cls = astroid["WebAppObject"]
         assert_keys = [
-            "__annotations__",
             "__module__",
             "__qualname__",
             "appli",
@@ -1349,7 +1300,10 @@ class ClassNodeTest(ModuleLoader, unittest.TestCase):
         astroid = builder.parse(data)
         self.assertEqual(astroid["g1"].fromlineno, 4)
         self.assertEqual(astroid["g1"].tolineno, 5)
-        self.assertEqual(astroid["g2"].fromlineno, 10)
+        if not PY38_PLUS or PY38 and IS_PYPY:
+            self.assertEqual(astroid["g2"].fromlineno, 9)
+        else:
+            self.assertEqual(astroid["g2"].fromlineno, 10)
         self.assertEqual(astroid["g2"].tolineno, 11)
 
     def test_metaclass_error(self) -> None:
@@ -1448,20 +1402,6 @@ class ClassNodeTest(ModuleLoader, unittest.TestCase):
         assert isinstance(klass, nodes.ClassDef)
         self.assertEqual(["object"], [base.name for base in klass.ancestors()])
         self.assertEqual("type", klass.metaclass().name)
-
-    @unittest.skipUnless(HAS_SIX, "These tests require the six library")
-    def test_metaclass_generator_hack_enum_base(self):
-        """Regression test for https://github.com/pylint-dev/pylint/issues/5935"""
-        klass = builder.extract_node(
-            """
-            import six
-            from enum import Enum, EnumMeta
-
-            class PetEnumPy2Metaclass(six.with_metaclass(EnumMeta, Enum)): #@
-                DOG = "dog"
-        """
-        )
-        self.assertEqual(list(klass.local_attr_ancestors("DOG")), [])
 
     def test_add_metaclass(self) -> None:
         klass = builder.extract_node(
@@ -1789,7 +1729,9 @@ class ClassNodeTest(ModuleLoader, unittest.TestCase):
                 "FinalClass",
                 "ClassB",
                 "MixinB",
-                "strMixin",
+                # We don't recognize what 'cls' is at time of .format() call, only
+                # what it is at the end.
+                # "strMixin",
                 "ClassA",
                 "MixinA",
                 "intMixin",
@@ -1954,17 +1896,21 @@ class ClassNodeTest(ModuleLoader, unittest.TestCase):
             cls.mro()
 
     def test_mro_typing_extensions(self):
-        """Regression test for mro() inference on typing_extensions.
+        """Regression test for mro() inference on typing_extesnions.
 
         Regression reported in:
-        https://github.com/pylint-dev/astroid/issues/1124
+        https://github.com/PyCQA/astroid/issues/1124
         """
         module = parse(
             """
         import abc
         import typing
         import dataclasses
-        from typing import Protocol
+
+        if sys.version_info >= (3, 8):
+            from typing import Protocol
+        else:
+            from typing_extensions import Protocol
 
         T = typing.TypeVar("T")
 
@@ -1984,6 +1930,9 @@ class ClassNodeTest(ModuleLoader, unittest.TestCase):
             "Protocol",
             "object",
         ]
+        if not PY38_PLUS:
+            class_names.pop(-2)
+
         final_def = module.body[-1]
         self.assertEqual(class_names, sorted(i.name for i in final_def.mro()))
 
@@ -1998,7 +1947,7 @@ class ClassNodeTest(ModuleLoader, unittest.TestCase):
         """
         )
         assert isinstance(func, nodes.FunctionDef)
-        result = next(func.infer_call_result(None))
+        result = next(func.infer_call_result())
         self.assertIsInstance(result, Generator)
         self.assertEqual(result.parent, func)
 
@@ -2154,9 +2103,9 @@ class ClassNodeTest(ModuleLoader, unittest.TestCase):
 
         # Test that objects analyzed through the live introspection
         # aren't considered to have dynamic getattr implemented.
-        astroid_builder = builder.AstroidBuilder(AstroidManager())
-        module = astroid_builder.module_build(difflib)
-        self.assertFalse(module["SequenceMatcher"].has_dynamic_getattr())
+        astroid_builder = builder.AstroidBuilder()
+        module = astroid_builder.module_build(datetime)
+        self.assertFalse(module["timedelta"].has_dynamic_getattr())
 
     def test_duplicate_bases_namedtuple(self) -> None:
         module = builder.parse(
@@ -2520,7 +2469,7 @@ def test_issue940_metaclass_funcdef_is_not_datadescriptor() -> None:
 
 
 def test_property_in_body_of_try() -> None:
-    """Regression test for https://github.com/pylint-dev/pylint/issues/6596."""
+    """Regression test for https://github.com/PyCQA/pylint/issues/6596."""
     node: nodes.Return = builder._extract_single_node(
         """
     def myfunc():
@@ -2747,11 +2696,13 @@ def test_metaclass_cannot_infer_call_yields_an_instance() -> None:
         ),
     ],
 )
+@test_utils.require_version("3.8")
 def test_posonlyargs_python_38(func):
     ast_node = builder.extract_node(func)
     assert ast_node.as_string().strip() == func.strip()
 
 
+@test_utils.require_version("3.8")
 def test_posonlyargs_default_value() -> None:
     ast_node = builder.extract_node(
         """
@@ -2768,7 +2719,7 @@ def test_posonlyargs_default_value() -> None:
 
 
 def test_ancestor_with_generic() -> None:
-    # https://github.com/pylint-dev/astroid/issues/942
+    # https://github.com/PyCQA/astroid/issues/942
     tree = builder.parse(
         """
     from typing import TypeVar, Generic
@@ -2805,6 +2756,7 @@ def test_slots_duplicate_bases_issue_1089() -> None:
 
 class TestFrameNodes:
     @staticmethod
+    @pytest.mark.skipif(not PY38_PLUS, reason="needs assignment expressions")
     def test_frame_node():
         """Test if the frame of FunctionDef, ClassDef and Module is correctly set."""
         module = builder.parse(
@@ -2825,24 +2777,24 @@ class TestFrameNodes:
         )
         function = module.body[0]
         assert function.frame() == function
-        assert function.frame() == function
+        assert function.frame(future=True) == function
         assert function.body[0].frame() == function
-        assert function.body[0].frame() == function
+        assert function.body[0].frame(future=True) == function
 
         class_node = module.body[1]
         assert class_node.frame() == class_node
-        assert class_node.frame() == class_node
+        assert class_node.frame(future=True) == class_node
         assert class_node.body[0].frame() == class_node
-        assert class_node.body[0].frame() == class_node
+        assert class_node.body[0].frame(future=True) == class_node
         assert class_node.body[1].frame() == class_node.body[1]
-        assert class_node.body[1].frame() == class_node.body[1]
+        assert class_node.body[1].frame(future=True) == class_node.body[1]
 
         lambda_assignment = module.body[2].value
         assert lambda_assignment.args.args[0].frame() == lambda_assignment
-        assert lambda_assignment.args.args[0].frame() == lambda_assignment
+        assert lambda_assignment.args.args[0].frame(future=True) == lambda_assignment
 
         assert module.frame() == module
-        assert module.frame() == module
+        assert module.frame(future=True) == module
 
     @staticmethod
     def test_non_frame_node():
@@ -2855,7 +2807,87 @@ class TestFrameNodes:
         """
         )
         assert module.body[0].frame() == module
-        assert module.body[0].frame() == module
+        assert module.body[0].frame(future=True) == module
 
         assert module.body[1].value.locals["x"][0].frame() == module
-        assert module.body[1].value.locals["x"][0].frame() == module
+        assert module.body[1].value.locals["x"][0].frame(future=True) == module
+
+
+def test_deprecation_of_doc_attribute() -> None:
+    code = textwrap.dedent(
+        """\
+    def func():
+        "Docstring"
+        return 1
+    """
+    )
+    node: nodes.FunctionDef = extract_node(code)  # type: ignore[assignment]
+    with pytest.warns(DeprecationWarning) as records:
+        assert node.doc == "Docstring"
+        assert len(records) == 1
+    with pytest.warns(DeprecationWarning) as records:
+        node.doc = None
+        assert len(records) == 1
+
+    code = textwrap.dedent(
+        """\
+    class MyClass():
+        '''Docstring'''
+    """
+    )
+    node: nodes.ClassDef = extract_node(code)  # type: ignore[assignment]
+    with pytest.warns(DeprecationWarning) as records:
+        assert node.doc == "Docstring"
+        assert len(records) == 1
+    with pytest.warns(DeprecationWarning) as records:
+        node.doc = None
+        assert len(records) == 1
+
+    code = textwrap.dedent(
+        """\
+    '''Docstring'''
+    """
+    )
+    node = parse(code)
+    with pytest.warns(DeprecationWarning) as records:
+        assert node.doc == "Docstring"
+        assert len(records) == 1
+    with pytest.warns(DeprecationWarning) as records:
+        node.doc = None
+        assert len(records) == 1
+
+    # If 'doc' isn't passed to Module, ClassDef, FunctionDef,
+    # no DeprecationWarning should be raised
+    doc_node = nodes.Const("Docstring")
+    with warnings.catch_warnings():
+        # Modify warnings filter to raise error for DeprecationWarning
+        warnings.simplefilter("error", DeprecationWarning)
+        node_module = nodes.Module(name="MyModule")
+        node_module.postinit(body=[], doc_node=doc_node)
+        assert node_module.doc_node == doc_node
+        node_class = nodes.ClassDef(name="MyClass")
+        node_class.postinit(bases=[], body=[], decorators=[], doc_node=doc_node)
+        assert node_class.doc_node == doc_node
+        node_func = nodes.FunctionDef(name="MyFunction")
+        node_func.postinit(args=nodes.Arguments(), body=[], doc_node=doc_node)
+        assert node_func.doc_node == doc_node
+
+    # Test 'doc' attribute if only 'doc_node' is passed
+    with pytest.warns(DeprecationWarning) as records:
+        assert node_module.doc == "Docstring"
+        assert len(records) == 1
+    with pytest.warns(DeprecationWarning) as records:
+        assert node_class.doc == "Docstring"
+        assert len(records) == 1
+    with pytest.warns(DeprecationWarning) as records:
+        assert node_func.doc == "Docstring"
+        assert len(records) == 1
+
+    # If 'doc' is passed to Module, ClassDef, FunctionDef,
+    # a DeprecationWarning should be raised
+    doc_node = nodes.Const("Docstring")
+    with pytest.warns(DeprecationWarning) as records:
+        node_module = nodes.Module(name="MyModule", doc="Docstring")
+        node_class = nodes.ClassDef(name="MyClass", doc="Docstring")
+        node_func = nodes.FunctionDef(name="MyFunction", doc="Docstring")
+        assert len(records) == 3

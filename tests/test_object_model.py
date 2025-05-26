@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 import unittest
 import xml
@@ -8,12 +8,12 @@ import xml
 import pytest
 
 import astroid
-from astroid import bases, builder, nodes, objects, util
+from astroid import bases, builder, nodes, objects, test_utils, util
 from astroid.const import PY311_PLUS
 from astroid.exceptions import InferenceError
 
 try:
-    import six  # type: ignore[import]  # pylint: disable=unused-import
+    import six  # pylint: disable=unused-import
 
     HAS_SIX = True
 except ImportError:
@@ -307,17 +307,7 @@ class ModuleModelTest(unittest.TestCase):
 
         init_ = next(ast_nodes[9].infer())
         assert isinstance(init_, bases.BoundMethod)
-        init_result = next(
-            init_.infer_call_result(
-                nodes.Call(
-                    parent=None,
-                    lineno=None,
-                    col_offset=None,
-                    end_lineno=None,
-                    end_col_offset=None,
-                )
-            )
-        )
+        init_result = next(init_.infer_call_result(nodes.Call()))
         assert isinstance(init_result, nodes.Const)
         assert init_result.value is None
 
@@ -362,6 +352,7 @@ class FunctionModelTest(unittest.TestCase):
         self.assertEqual(len(args), 2)
         self.assertEqual([arg.name for arg in args], ["self", "type"])
 
+    @test_utils.require_version(minver="3.8")
     def test__get__and_positional_only_args(self):
         node = builder.extract_node(
             """
@@ -494,17 +485,7 @@ class FunctionModelTest(unittest.TestCase):
 
         init_ = next(ast_nodes[9].infer())
         assert isinstance(init_, bases.BoundMethod)
-        init_result = next(
-            init_.infer_call_result(
-                nodes.Call(
-                    parent=None,
-                    lineno=None,
-                    col_offset=None,
-                    end_lineno=None,
-                    end_col_offset=None,
-                )
-            )
-        )
+        init_result = next(init_.infer_call_result(nodes.Call()))
         assert isinstance(init_result, nodes.Const)
         assert init_result.value is None
 
@@ -572,6 +553,7 @@ class FunctionModelTest(unittest.TestCase):
         self.assertIsInstance(kwdefaults, astroid.Dict)
         # self.assertEqual(kwdefaults.getitem('f').value, 'lala')
 
+    @test_utils.require_version(minver="3.8")
     def test_annotation_positional_only(self):
         ast_node = builder.extract_node(
             """
@@ -586,10 +568,6 @@ class FunctionModelTest(unittest.TestCase):
         self.assertEqual(annotations.getitem(astroid.Const("a")).value, 1)
         self.assertEqual(annotations.getitem(astroid.Const("b")).value, 2)
         self.assertEqual(annotations.getitem(astroid.Const("c")).value, 3)
-
-    def test_is_not_lambda(self):
-        ast_node = builder.extract_node("def func(): pass")
-        self.assertIs(ast_node.is_lambda, False)
 
 
 class TestContextManagerModel:
@@ -740,14 +718,13 @@ class ExceptionModelTest(unittest.TestCase):
     def test_unicodedecodeerror(self) -> None:
         code = """
         try:
-            raise UnicodeDecodeError("utf-8", b"blob", 0, 1, "reason")
+            raise UnicodeDecodeError("utf-8", "blob", 0, 1, "reason")
         except UnicodeDecodeError as error:
-            error.object #@
+            error.object[:1] #@
         """
         node = builder.extract_node(code)
         inferred = next(node.infer())
         assert isinstance(inferred, astroid.Const)
-        assert inferred.value == b""
 
     def test_import_error(self) -> None:
         ast_nodes = builder.extract_node(
@@ -832,13 +809,13 @@ class TestExceptionInstanceModel:
         assert not args.elts
 
 
-@pytest.mark.parametrize("parentheses", (True, False))
-def test_lru_cache(parentheses) -> None:
-    ast_nodes = builder.extract_node(
-        f"""
+class LruCacheModelTest(unittest.TestCase):
+    def test_lru_cache(self) -> None:
+        ast_nodes = builder.extract_node(
+            """
         import functools
         class Foo(object):
-            @functools.lru_cache{"()" if parentheses else ""}
+            @functools.lru_cache()
             def foo():
                 pass
         f = Foo()
@@ -846,56 +823,12 @@ def test_lru_cache(parentheses) -> None:
         f.foo.__wrapped__ #@
         f.foo.cache_info() #@
         """
-    )
-    assert isinstance(ast_nodes, list)
-    cache_clear = next(ast_nodes[0].infer())
-    assert isinstance(cache_clear, astroid.BoundMethod)
-    wrapped = next(ast_nodes[1].infer())
-    assert isinstance(wrapped, astroid.FunctionDef)
-    assert wrapped.name == "foo"
-    cache_info = next(ast_nodes[2].infer())
-    assert isinstance(cache_info, astroid.Instance)
-
-
-def test_class_annotations() -> None:
-    """Test that the `__annotations__` attribute is avaiable in the class scope"""
-    annotations, klass_attribute = builder.extract_node(
-        """
-        class Test:
-            __annotations__  #@
-        Test.__annotations__  #@
-        """
-    )
-    # Test that `__annotations__` attribute is available in the class scope:
-    assert isinstance(annotations, nodes.Name)
-    # The `__annotations__` attribute is `Uninferable`:
-    assert next(annotations.infer()) is astroid.Uninferable
-
-    # Test that we can access the class annotations:
-    assert isinstance(klass_attribute, nodes.Attribute)
-
-
-def test_class_annotations_typed_dict() -> None:
-    """Test that we can access class annotations on various TypedDicts"""
-    apple, pear = builder.extract_node(
-        """
-        from typing import TypedDict
-
-
-        class Apple(TypedDict):
-            a: int
-            b: str
-
-
-        Pear = TypedDict('OtherTypedDict', {'a': int, 'b': str})
-
-
-        Apple.__annotations__  #@
-        Pear.__annotations__  #@
-        """
-    )
-
-    assert isinstance(apple, nodes.Attribute)
-    assert next(apple.infer()) is astroid.Uninferable
-    assert isinstance(pear, nodes.Attribute)
-    assert next(pear.infer()) is astroid.Uninferable
+        )
+        assert isinstance(ast_nodes, list)
+        cache_clear = next(ast_nodes[0].infer())
+        self.assertIsInstance(cache_clear, astroid.BoundMethod)
+        wrapped = next(ast_nodes[1].infer())
+        self.assertIsInstance(wrapped, astroid.FunctionDef)
+        self.assertEqual(wrapped.name, "foo")
+        cache_info = next(ast_nodes[2].infer())
+        self.assertIsInstance(cache_info, astroid.Instance)

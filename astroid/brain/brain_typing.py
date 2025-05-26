@@ -1,28 +1,24 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 """Astroid hooks for typing.py support."""
 
 from __future__ import annotations
 
-import textwrap
+import sys
 import typing
 from collections.abc import Iterator
 from functools import partial
-from typing import Final
 
-from astroid import context
-from astroid.brain.helpers import register_module_extender
-from astroid.builder import AstroidBuilder, _extract_single_node, extract_node
-from astroid.const import PY312_PLUS, PY313_PLUS, PY314_PLUS
+from astroid import context, extract_node, inference_tip
+from astroid.builder import _extract_single_node
+from astroid.const import PY38_PLUS, PY39_PLUS
 from astroid.exceptions import (
-    AstroidSyntaxError,
     AttributeInferenceError,
     InferenceError,
     UseInferenceDefault,
 )
-from astroid.inference_tip import inference_tip
 from astroid.manager import AstroidManager
 from astroid.nodes.node_classes import (
     Assign,
@@ -34,8 +30,14 @@ from astroid.nodes.node_classes import (
     Name,
     NodeNG,
     Subscript,
+    Tuple,
 )
 from astroid.nodes.scoped_nodes import ClassDef, FunctionDef
+
+if sys.version_info >= (3, 8):
+    from typing import Final
+else:
+    from typing_extensions import Final
 
 TYPING_TYPEVARS = {"TypeVar", "NewType"}
 TYPING_TYPEVARS_QUALIFIED: Final = {
@@ -78,7 +80,7 @@ TYPING_ALIAS = frozenset(
         "typing.MutableMapping",
         "typing.Sequence",
         "typing.MutableSequence",
-        "typing.ByteString",  # removed in 3.14
+        "typing.ByteString",
         "typing.Tuple",
         "typing.List",
         "typing.Deque",
@@ -119,9 +121,7 @@ def looks_like_typing_typevar_or_newtype(node) -> bool:
     return False
 
 
-def infer_typing_typevar_or_newtype(
-    node: Call, context_itton: context.InferenceContext | None = None
-) -> Iterator[ClassDef]:
+def infer_typing_typevar_or_newtype(node, context_itton=None):
     """Infer a typing.TypeVar(...) or typing.NewType(...) call."""
     try:
         func = next(node.func.infer(context=context_itton))
@@ -137,10 +137,7 @@ def infer_typing_typevar_or_newtype(
         raise UseInferenceDefault
 
     typename = node.args[0].as_string().strip("'")
-    try:
-        node = extract_node(TYPING_TYPE_TEMPLATE.format(typename))
-    except AstroidSyntaxError as exc:
-        raise InferenceError from exc
+    node = extract_node(TYPING_TYPE_TEMPLATE.format(typename))
     return node.infer(context=context_itton)
 
 
@@ -168,15 +165,6 @@ def infer_typing_attr(
         # If typing subscript belongs to an alias handle it separately.
         raise UseInferenceDefault
 
-    if (
-        PY313_PLUS
-        and isinstance(value, FunctionDef)
-        and value.qname() == "typing.Annotated"
-    ):
-        # typing.Annotated is a FunctionDef on 3.13+
-        node._explicit_inference = lambda node, context: iter([value])
-        return iter([value])
-
     if isinstance(value, ClassDef) and value.qname() in {
         "typing.Generic",
         "typing.Annotated",
@@ -197,26 +185,10 @@ def infer_typing_attr(
             cache = node.parent.__cache  # type: ignore[attr-defined] # Unrecognized getattr
             if cache.get(node.parent.slots) is not None:
                 del cache[node.parent.slots]
-        # Avoid re-instantiating this class every time it's seen
-        node._explicit_inference = lambda node, context: iter([value])
         return iter([value])
 
     node = extract_node(TYPING_TYPE_TEMPLATE.format(value.qname().split(".")[-1]))
     return node.infer(context=ctx)
-
-
-def _looks_like_generic_class_pep695(node: ClassDef) -> bool:
-    """Check if class is using type parameter. Python 3.12+."""
-    return len(node.type_params) > 0
-
-
-def infer_typing_generic_class_pep695(
-    node: ClassDef, ctx: context.InferenceContext | None = None
-) -> Iterator[ClassDef]:
-    """Add __class_getitem__ for generic classes. Python 3.12+."""
-    func_to_add = _extract_single_node(CLASS_GETITEM_TEMPLATE)
-    node.locals["__class_getitem__"] = [func_to_add]
-    return iter([node])
 
 
 def _looks_like_typedDict(  # pylint: disable=invalid-name
@@ -224,6 +196,14 @@ def _looks_like_typedDict(  # pylint: disable=invalid-name
 ) -> bool:
     """Check if node is TypedDict FunctionDef."""
     return node.qname() in TYPING_TYPEDDICT_QUALIFIED
+
+
+def infer_old_typedDict(  # pylint: disable=invalid-name
+    node: ClassDef, ctx: context.InferenceContext | None = None
+) -> Iterator[ClassDef]:
+    func_to_add = _extract_single_node("dict")
+    node.locals["__call__"] = [func_to_add]
+    return iter([node])
 
 
 def infer_typedDict(  # pylint: disable=invalid-name
@@ -235,8 +215,6 @@ def infer_typedDict(  # pylint: disable=invalid-name
         lineno=node.lineno,
         col_offset=node.col_offset,
         parent=node.parent,
-        end_lineno=node.end_lineno,
-        end_col_offset=node.end_col_offset,
     )
     class_def.postinit(bases=[extract_node("dict")], body=[], decorators=None)
     func_to_add = _extract_single_node("dict")
@@ -256,9 +234,7 @@ def _looks_like_typing_alias(node: Call) -> bool:
     """
     return (
         isinstance(node.func, Name)
-        # TODO: remove _DeprecatedGenericAlias when Py3.14 min
-        and node.func.name in {"_alias", "_DeprecatedGenericAlias"}
-        and len(node.args) == 2
+        and node.func.name == "_alias"
         and (
             # _alias function works also for builtins object such as list and dict
             isinstance(node.args[0], (Attribute, Name))
@@ -300,8 +276,6 @@ def infer_typing_alias(
 
     :param node: call node
     :param context: inference context
-
-    # TODO: evaluate if still necessary when Py3.12 is minimum
     """
     if (
         not isinstance(node.parent, Assign)
@@ -321,8 +295,6 @@ def infer_typing_alias(
         lineno=assign_name.lineno,
         col_offset=assign_name.col_offset,
         parent=node.parent,
-        end_lineno=assign_name.end_lineno,
-        end_col_offset=assign_name.end_col_offset,
     )
     if isinstance(res, ClassDef):
         # Only add `res` as base if it's a `ClassDef`
@@ -330,7 +302,13 @@ def infer_typing_alias(
         class_def.postinit(bases=[res], body=[], decorators=None)
 
     maybe_type_var = node.args[1]
-    if isinstance(maybe_type_var, Const) and maybe_type_var.value > 0:
+    if (
+        not PY39_PLUS
+        and not (isinstance(maybe_type_var, Tuple) and not maybe_type_var.elts)
+        or PY39_PLUS
+        and isinstance(maybe_type_var, Const)
+        and maybe_type_var.value > 0
+    ):
         # If typing alias is subscriptable, add `__class_getitem__` to ClassDef
         func_to_add = _extract_single_node(CLASS_GETITEM_TEMPLATE)
         class_def.locals["__class_getitem__"] = [func_to_add]
@@ -339,9 +317,6 @@ def infer_typing_alias(
         # This is an issue in cases where the aliased class implements it,
         # but the typing alias isn't subscriptable. E.g., `typing.ByteString` for PY39+
         _forbid_class_getitem_access(class_def)
-
-    # Avoid re-instantiating this class every time it's seen
-    node._explicit_inference = lambda node, context: iter([class_def])
     return iter([class_def])
 
 
@@ -358,13 +333,20 @@ def _looks_like_special_alias(node: Call) -> bool:
     PY39: Callable = _CallableType(collections.abc.Callable, 2)
     """
     return isinstance(node.func, Name) and (
-        (
+        not PY39_PLUS
+        and node.func.name == "_VariadicGenericAlias"
+        and (
+            isinstance(node.args[0], Name)
+            and node.args[0].name == "tuple"
+            or isinstance(node.args[0], Attribute)
+            and node.args[0].as_string() == "collections.abc.Callable"
+        )
+        or PY39_PLUS
+        and (
             node.func.name == "_TupleType"
             and isinstance(node.args[0], Name)
             and node.args[0].name == "tuple"
-        )
-        or (
-            node.func.name == "_CallableType"
+            or node.func.name == "_CallableType"
             and isinstance(node.args[0], Attribute)
             and node.args[0].as_string() == "collections.abc.Callable"
         )
@@ -390,22 +372,19 @@ def infer_special_alias(
     class_def = ClassDef(
         name=assign_name.name,
         parent=node.parent,
-        lineno=assign_name.lineno,
-        col_offset=assign_name.col_offset,
-        end_lineno=assign_name.end_lineno,
-        end_col_offset=assign_name.end_col_offset,
     )
     class_def.postinit(bases=[res], body=[], decorators=None)
     func_to_add = _extract_single_node(CLASS_GETITEM_TEMPLATE)
     class_def.locals["__class_getitem__"] = [func_to_add]
-    # Avoid re-instantiating this class every time it's seen
-    node._explicit_inference = lambda node, context: iter([class_def])
     return iter([class_def])
 
 
 def _looks_like_typing_cast(node: Call) -> bool:
-    return (isinstance(node.func, Name) and node.func.name == "cast") or (
-        isinstance(node.func, Attribute) and node.func.attrname == "cast"
+    return isinstance(node, Call) and (
+        isinstance(node.func, Name)
+        and node.func.name == "cast"
+        or isinstance(node.func, Attribute)
+        and node.func.attrname == "cast"
     )
 
 
@@ -430,82 +409,30 @@ def infer_typing_cast(
     return node.args[1].infer(context=ctx)
 
 
-def _typing_transform():
-    code = textwrap.dedent(
-        """
-    class Generic:
-        @classmethod
-        def __class_getitem__(cls, item):  return cls
-    class ParamSpec:
-        @property
-        def args(self):
-            return ParamSpecArgs(self)
-        @property
-        def kwargs(self):
-            return ParamSpecKwargs(self)
-    class ParamSpecArgs: ...
-    class ParamSpecKwargs: ...
-    class TypeAlias: ...
-    class Type:
-        @classmethod
-        def __class_getitem__(cls, item):  return cls
-    class TypeVar:
-        @classmethod
-        def __class_getitem__(cls, item):  return cls
-    class TypeVarTuple: ...
-    class ContextManager:
-        @classmethod
-        def __class_getitem__(cls, item):  return cls
-    class AsyncContextManager:
-        @classmethod
-        def __class_getitem__(cls, item):  return cls
-    class Pattern:
-        @classmethod
-        def __class_getitem__(cls, item):  return cls
-    class Match:
-        @classmethod
-        def __class_getitem__(cls, item):  return cls
-    """
-    )
-    if PY314_PLUS:
-        code += textwrap.dedent(
-            """
-    class Union:
-        @classmethod
-        def __class_getitem__(cls, item): return cls
-    """
-        )
-    return AstroidBuilder(AstroidManager()).string_build(code)
+AstroidManager().register_transform(
+    Call,
+    inference_tip(infer_typing_typevar_or_newtype),
+    looks_like_typing_typevar_or_newtype,
+)
+AstroidManager().register_transform(
+    Subscript, inference_tip(infer_typing_attr), _looks_like_typing_subscript
+)
+AstroidManager().register_transform(
+    Call, inference_tip(infer_typing_cast), _looks_like_typing_cast
+)
 
-
-def register(manager: AstroidManager) -> None:
-    manager.register_transform(
-        Call,
-        inference_tip(infer_typing_typevar_or_newtype),
-        looks_like_typing_typevar_or_newtype,
-    )
-    manager.register_transform(
-        Subscript, inference_tip(infer_typing_attr), _looks_like_typing_subscript
-    )
-    manager.register_transform(
-        Call, inference_tip(infer_typing_cast), _looks_like_typing_cast
-    )
-
-    manager.register_transform(
+if PY39_PLUS:
+    AstroidManager().register_transform(
         FunctionDef, inference_tip(infer_typedDict), _looks_like_typedDict
     )
-
-    manager.register_transform(
-        Call, inference_tip(infer_typing_alias), _looks_like_typing_alias
-    )
-    manager.register_transform(
-        Call, inference_tip(infer_special_alias), _looks_like_special_alias
+elif PY38_PLUS:
+    AstroidManager().register_transform(
+        ClassDef, inference_tip(infer_old_typedDict), _looks_like_typedDict
     )
 
-    if PY312_PLUS:
-        register_module_extender(manager, "typing", _typing_transform)
-        manager.register_transform(
-            ClassDef,
-            inference_tip(infer_typing_generic_class_pep695),
-            _looks_like_generic_class_pep695,
-        )
+AstroidManager().register_transform(
+    Call, inference_tip(infer_typing_alias), _looks_like_typing_alias
+)
+AstroidManager().register_transform(
+    Call, inference_tip(infer_special_alias), _looks_like_special_alias
+)

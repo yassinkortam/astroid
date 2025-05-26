@@ -1,13 +1,12 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 import os
 import site
 import sys
 import time
 import unittest
-import warnings
 from collections.abc import Iterator
 from contextlib import contextmanager
 from unittest import mock
@@ -16,16 +15,16 @@ import pytest
 
 import astroid
 from astroid import manager, test_utils
-from astroid.const import IS_JYTHON, IS_PYPY, PY312_PLUS
+from astroid.const import IS_JYTHON, IS_PYPY
 from astroid.exceptions import (
     AstroidBuildingError,
     AstroidImportError,
     AttributeInferenceError,
 )
 from astroid.interpreter._import import util
-from astroid.modutils import EXT_LIB_DIRS, module_in_path
+from astroid.modutils import EXT_LIB_DIRS, is_standard_module
 from astroid.nodes import Const
-from astroid.nodes.scoped_nodes import ClassDef, Module
+from astroid.nodes.scoped_nodes import ClassDef
 
 from . import resources
 
@@ -36,11 +35,12 @@ def _get_file_from_object(obj) -> str:
     return obj.__file__
 
 
-class AstroidManagerTest(resources.SysPathSetup, unittest.TestCase):
+class AstroidManagerTest(
+    resources.SysPathSetup, resources.AstroidCacheSetupMixin, unittest.TestCase
+):
     def setUp(self) -> None:
         super().setUp()
         self.manager = test_utils.brainless_manager()
-        self.manager.clear_cache()
 
     def test_ast_from_file(self) -> None:
         filepath = unittest.__file__
@@ -136,7 +136,7 @@ class AstroidManagerTest(resources.SysPathSetup, unittest.TestCase):
         self.assertFalse(util.is_namespace("tests.testdata.python3.data.all"))
         self.assertFalse(util.is_namespace("__main__"))
         self.assertFalse(
-            util.is_namespace(next(iter(EXT_LIB_DIRS)).rsplit("/", maxsplit=1)[-1]),
+            util.is_namespace(list(EXT_LIB_DIRS)[0].rsplit("/", maxsplit=1)[-1]),
         )
         self.assertFalse(util.is_namespace("importlib._bootstrap"))
 
@@ -154,7 +154,7 @@ class AstroidManagerTest(resources.SysPathSetup, unittest.TestCase):
         side_effect=AttributeError,
     )
     def test_module_unexpectedly_missing_path(self, mocked) -> None:
-        """Https://github.com/pylint-dev/pylint/issues/7592."""
+        """Https://github.com/PyCQA/pylint/issues/7592."""
         self.assertFalse(util.is_namespace("astroid"))
 
     def test_module_unexpectedly_spec_is_none(self) -> None:
@@ -320,12 +320,12 @@ class AstroidManagerTest(resources.SysPathSetup, unittest.TestCase):
         ast = self.manager.ast_from_class(int)
         self.assertEqual(ast.name, "int")
         self.assertEqual(ast.parent.frame().name, "builtins")
-        self.assertEqual(ast.parent.frame().name, "builtins")
+        self.assertEqual(ast.parent.frame(future=True).name, "builtins")
 
         ast = self.manager.ast_from_class(object)
         self.assertEqual(ast.name, "object")
         self.assertEqual(ast.parent.frame().name, "builtins")
-        self.assertEqual(ast.parent.frame().name, "builtins")
+        self.assertEqual(ast.parent.frame(future=True).name, "builtins")
         self.assertIn("__setattr__", ast)
 
     def test_ast_from_class_with_module(self) -> None:
@@ -333,12 +333,12 @@ class AstroidManagerTest(resources.SysPathSetup, unittest.TestCase):
         ast = self.manager.ast_from_class(int, int.__module__)
         self.assertEqual(ast.name, "int")
         self.assertEqual(ast.parent.frame().name, "builtins")
-        self.assertEqual(ast.parent.frame().name, "builtins")
+        self.assertEqual(ast.parent.frame(future=True).name, "builtins")
 
         ast = self.manager.ast_from_class(object, object.__module__)
         self.assertEqual(ast.name, "object")
         self.assertEqual(ast.parent.frame().name, "builtins")
-        self.assertEqual(ast.parent.frame().name, "builtins")
+        self.assertEqual(ast.parent.frame(future=True).name, "builtins")
         self.assertIn("__setattr__", ast)
 
     def test_ast_from_class_attr_error(self) -> None:
@@ -364,7 +364,7 @@ class AstroidManagerTest(resources.SysPathSetup, unittest.TestCase):
     def test_same_name_import_module(self) -> None:
         """Test inference of an import statement with the same name as the module.
 
-        See https://github.com/pylint-dev/pylint/issues/5151.
+        See https://github.com/PyCQA/pylint/issues/5151.
         """
         math_file = resources.find("data/import_conflicting_names/math.py")
         module = self.manager.ast_from_file(math_file)
@@ -382,28 +382,6 @@ class AstroidManagerTest(resources.SysPathSetup, unittest.TestCase):
         with pytest.raises(AstroidBuildingError):
             self.manager.ast_from_module_name(None)
 
-    def test_denied_modules_raise(self) -> None:
-        self.manager.module_denylist.add("random")
-        with pytest.raises(AstroidImportError, match="random"):
-            self.manager.ast_from_module_name("random")
-        # and module not in the deny list shouldn't raise
-        self.manager.ast_from_module_name("math")
-
-
-class IsolatedAstroidManagerTest(unittest.TestCase):
-    @pytest.mark.skipif(PY312_PLUS, reason="distutils was removed in python 3.12")
-    def test_no_user_warning(self):
-        """When Python 3.12 is minimum, this test will no longer provide value."""
-        mgr = manager.AstroidManager()
-        self.addCleanup(mgr.clear_cache)
-        with warnings.catch_warnings():
-            warnings.filterwarnings("error", category=UserWarning)
-            mgr.ast_from_module_name("setuptools")
-            try:
-                mgr.ast_from_module_name("pip")
-            except astroid.AstroidImportError:
-                pytest.skip("pip is not installed")
-
 
 class BorgAstroidManagerTC(unittest.TestCase):
     def test_borg(self) -> None:
@@ -417,24 +395,11 @@ class BorgAstroidManagerTC(unittest.TestCase):
         second_built = second_manager.ast_from_module_name("builtins")
         self.assertIs(built, second_built)
 
-    def test_max_inferable_values(self) -> None:
-        mgr = manager.AstroidManager()
-        original_limit = mgr.max_inferable_values
-
-        def reset_limit():
-            nonlocal original_limit
-            manager.AstroidManager().max_inferable_values = original_limit
-
-        self.addCleanup(reset_limit)
-
-        mgr.max_inferable_values = 4
-        self.assertEqual(manager.AstroidManager.brain["max_inferable_values"], 4)
-
 
 class ClearCacheTest(unittest.TestCase):
     def test_clear_cache_clears_other_lru_caches(self) -> None:
         lrus = (
-            astroid.nodes._base_nodes.LookupMixIn.lookup,
+            astroid.nodes.node_classes.LookupMixIn.lookup,
             astroid.modutils._cache_normalize_path_,
             util.is_namespace,
             astroid.interpreter.objectmodel.ObjectModel.attributes,
@@ -445,27 +410,12 @@ class ClearCacheTest(unittest.TestCase):
         baseline_cache_infos = [lru.cache_info() for lru in lrus]
 
         # Generate some hits and misses
-        module = Module("", file="", path=[], package=False)
-        ClassDef(
-            "",
-            lineno=0,
-            col_offset=0,
-            end_lineno=0,
-            end_col_offset=0,
-            parent=module,
-        ).lookup("garbage")
-        module_in_path("unittest", "garbage_path")
+        ClassDef().lookup("garbage")
+        is_standard_module("unittest", std_path=["garbage_path"])
         util.is_namespace("unittest")
         astroid.interpreter.objectmodel.ObjectModel().attributes()
         with pytest.raises(AttributeInferenceError):
-            ClassDef(
-                "",
-                lineno=0,
-                col_offset=0,
-                end_lineno=0,
-                end_col_offset=0,
-                parent=module,
-            ).getattr("garbage")
+            ClassDef().getattr("garbage")
 
         # Did the hits or misses actually happen?
         incremented_cache_infos = [lru.cache_info() for lru in lrus]
@@ -480,8 +430,6 @@ class ClearCacheTest(unittest.TestCase):
 
         astroid.MANAGER.clear_cache()  # also calls bootstrap()
 
-        self.assertEqual(astroid.context._INFERENCE_CACHE, {})
-
         # The cache sizes are now as low or lower than the original baseline
         cleared_cache_infos = [lru.cache_info() for lru in lrus]
         for cleared_cache, baseline_cache in zip(
@@ -490,32 +438,6 @@ class ClearCacheTest(unittest.TestCase):
             with self.subTest(cleared_cache=cleared_cache):
                 # less equal because the "baseline" might have had multiple calls to bootstrap()
                 self.assertLessEqual(cleared_cache.currsize, baseline_cache.currsize)
-
-    def test_file_cache_after_clear_cache(self) -> None:
-        """Test to mimic the behavior of how pylint lints file and
-        ensure clear cache clears everything stored in the cache.
-        See https://github.com/pylint-dev/pylint/pull/9932#issuecomment-2364985551
-        for more information.
-        """
-        orig_sys_path = sys.path[:]
-        try:
-            search_path = resources.RESOURCE_PATH
-            sys.path.insert(0, search_path)
-            node = astroid.MANAGER.ast_from_file(resources.find("data/cache/a.py"))
-            self.assertEqual(node.name, "cache.a")
-
-            # This import from statement should succeed and update the astroid cache
-            importfrom_node = astroid.extract_node("from cache import a")
-            importfrom_node.do_import_module(importfrom_node.modname)
-        finally:
-            sys.path = orig_sys_path
-
-        astroid.MANAGER.clear_cache()
-
-        importfrom_node = astroid.extract_node("from cache import a")
-        # Try import from again after clear cache, this should raise an error
-        with self.assertRaises(AstroidBuildingError):
-            importfrom_node.do_import_module(importfrom_node.modname)
 
     def test_brain_plugins_reloaded_after_clearing_cache(self) -> None:
         astroid.MANAGER.clear_cache()

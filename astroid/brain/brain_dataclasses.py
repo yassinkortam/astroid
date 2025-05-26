@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 """
 Astroid hook for the dataclasses library.
@@ -14,22 +14,28 @@ dataclasses. References:
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Iterator
-from typing import Literal, Union
+from typing import Tuple, Union
 
-from astroid import bases, context, nodes
+from astroid import bases, context, helpers, nodes
 from astroid.builder import parse
-from astroid.const import PY310_PLUS, PY313_PLUS
+from astroid.const import PY39_PLUS, PY310_PLUS
 from astroid.exceptions import AstroidSyntaxError, InferenceError, UseInferenceDefault
 from astroid.inference_tip import inference_tip
 from astroid.manager import AstroidManager
 from astroid.typing import InferenceResult
-from astroid.util import Uninferable, UninferableBase, safe_infer
+from astroid.util import Uninferable, UninferableBase
+
+if sys.version_info >= (3, 8):
+    from typing import Literal
+else:
+    from typing_extensions import Literal
 
 _FieldDefaultReturn = Union[
     None,
-    tuple[Literal["default"], nodes.NodeNG],
-    tuple[Literal["default_factory"], nodes.Call],
+    Tuple[Literal["default"], nodes.NodeNG],
+    Tuple[Literal["default_factory"], nodes.Call],
 ]
 
 DATACLASSES_DECORATORS = frozenset(("dataclass",))
@@ -238,12 +244,10 @@ def _get_previous_field_default(node: nodes.ClassDef, name: str) -> nodes.NodeNG
     return None
 
 
-def _generate_dataclass_init(
+def _generate_dataclass_init(  # pylint: disable=too-many-locals
     node: nodes.ClassDef, assigns: list[nodes.AnnAssign], kw_only_decorated: bool
 ) -> str:
     """Return an init method for a dataclass given the targets."""
-    # pylint: disable = too-many-locals, too-many-branches, too-many-statements
-
     params: list[str] = []
     kw_only_params: list[str] = []
     assignments: list[str] = []
@@ -316,9 +320,7 @@ def _generate_dataclass_init(
             # But we can't represent those as string
             try:
                 # Call str to make sure also Uninferable gets stringified
-                default_str = str(
-                    next(property_node.infer_call_result(None)).as_string()
-                )
+                default_str = str(next(property_node.infer_call_result()).as_string())
             except (InferenceError, StopIteration):
                 pass
         else:
@@ -358,7 +360,7 @@ def _generate_dataclass_init(
             if name in prev_pos_only_store:
                 prev_pos_only_store[name] = (ann_str, default_str)
             elif name in prev_kw_only_store:
-                params = [name, *params]
+                params = [name] + params
                 prev_kw_only_store.pop(name)
             else:
                 params.append(param_str)
@@ -484,7 +486,7 @@ def _looks_like_dataclass_field_call(
     If check_scope is False, skips checking the statement and body.
     """
     if check_scope:
-        stmt = node.statement()
+        stmt = node.statement(future=True)
         scope = stmt.scope()
         if not (
             isinstance(stmt, nodes.AnnAssign)
@@ -503,17 +505,6 @@ def _looks_like_dataclass_field_call(
         return False
 
     return inferred.name == FIELD_NAME and inferred.root().name in DATACLASS_MODULES
-
-
-def _looks_like_dataclasses(node: nodes.Module) -> bool:
-    return node.qname() == "dataclasses"
-
-
-def _resolve_private_replace_to_public(node: nodes.Module) -> None:
-    """In python/cpython@6f3c138, a _replace() method was extracted from
-    replace(), and this indirection made replace() uninferable."""
-    if "_replace" in node.locals:
-        node.locals["replace"] = node.locals["_replace"]
 
 
 def _get_field_default(field_call: nodes.Call) -> _FieldDefaultReturn:
@@ -541,10 +532,8 @@ def _get_field_default(field_call: nodes.Call) -> _FieldDefaultReturn:
             lineno=field_call.lineno,
             col_offset=field_call.col_offset,
             parent=field_call.parent,
-            end_lineno=field_call.end_lineno,
-            end_col_offset=field_call.end_col_offset,
         )
-        new_call.postinit(func=default_factory, args=[], keywords=[])
+        new_call.postinit(func=default_factory)
         return "default_factory", new_call
 
     return None
@@ -552,19 +541,29 @@ def _get_field_default(field_call: nodes.Call) -> _FieldDefaultReturn:
 
 def _is_class_var(node: nodes.NodeNG) -> bool:
     """Return True if node is a ClassVar, with or without subscripting."""
-    try:
-        inferred = next(node.infer())
-    except (InferenceError, StopIteration):
-        return False
+    if PY39_PLUS:
+        try:
+            inferred = next(node.infer())
+        except (InferenceError, StopIteration):
+            return False
 
-    return getattr(inferred, "name", "") == "ClassVar"
+        return getattr(inferred, "name", "") == "ClassVar"
+
+    # Before Python 3.9, inference returns typing._SpecialForm instead of ClassVar.
+    # Our backup is to inspect the node's structure.
+    return isinstance(node, nodes.Subscript) and (
+        isinstance(node.value, nodes.Name)
+        and node.value.name == "ClassVar"
+        or isinstance(node.value, nodes.Attribute)
+        and node.value.attrname == "ClassVar"
+    )
 
 
 def _is_keyword_only_sentinel(node: nodes.NodeNG) -> bool:
     """Return True if node is the KW_ONLY sentinel."""
     if not PY310_PLUS:
         return False
-    inferred = safe_infer(node)
+    inferred = helpers.safe_infer(node)
     return (
         isinstance(inferred, bases.Instance)
         and inferred.qname() == "dataclasses._KW_ONLY_TYPE"
@@ -620,26 +619,18 @@ def _infer_instance_from_annotation(
         yield klass.instantiate_class()
 
 
-def register(manager: AstroidManager) -> None:
-    if PY313_PLUS:
-        manager.register_transform(
-            nodes.Module,
-            _resolve_private_replace_to_public,
-            _looks_like_dataclasses,
-        )
+AstroidManager().register_transform(
+    nodes.ClassDef, dataclass_transform, is_decorated_with_dataclass
+)
 
-    manager.register_transform(
-        nodes.ClassDef, dataclass_transform, is_decorated_with_dataclass
-    )
+AstroidManager().register_transform(
+    nodes.Call,
+    inference_tip(infer_dataclass_field_call, raise_on_overwrite=True),
+    _looks_like_dataclass_field_call,
+)
 
-    manager.register_transform(
-        nodes.Call,
-        inference_tip(infer_dataclass_field_call, raise_on_overwrite=True),
-        _looks_like_dataclass_field_call,
-    )
-
-    manager.register_transform(
-        nodes.Unknown,
-        inference_tip(infer_dataclass_attribute, raise_on_overwrite=True),
-        _looks_like_dataclass_attribute,
-    )
+AstroidManager().register_transform(
+    nodes.Unknown,
+    inference_tip(infer_dataclass_attribute, raise_on_overwrite=True),
+    _looks_like_dataclass_attribute,
+)

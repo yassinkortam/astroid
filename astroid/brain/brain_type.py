@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 """
 Astroid hooks for type support.
@@ -22,15 +22,14 @@ Thanks to Lukasz Langa for fruitful discussion.
 
 from __future__ import annotations
 
-from astroid import nodes
-from astroid.builder import extract_node
+from astroid import extract_node, inference_tip, nodes
+from astroid.const import PY39_PLUS
 from astroid.context import InferenceContext
 from astroid.exceptions import UseInferenceDefault
-from astroid.inference_tip import inference_tip
 from astroid.manager import AstroidManager
 
 
-def _looks_like_type_subscript(node: nodes.Name) -> bool:
+def _looks_like_type_subscript(node) -> bool:
     """
     Try to figure out if a Name node is used inside a type related subscript.
 
@@ -38,7 +37,7 @@ def _looks_like_type_subscript(node: nodes.Name) -> bool:
     :type node: astroid.nodes.node_classes.NodeNG
     :return: whether the node is a Name node inside a type related subscript
     """
-    if isinstance(node.parent, nodes.Subscript):
+    if isinstance(node, nodes.Name) and isinstance(node.parent, nodes.Subscript):
         return node.name == "type"
     return False
 
@@ -64,7 +63,7 @@ def infer_type_sub(node, context: InferenceContext | None = None):
     return node.infer(context=context)
 
 
-def register(manager: AstroidManager) -> None:
-    manager.register_transform(
+if PY39_PLUS:
+    AstroidManager().register_transform(
         nodes.Name, inference_tip(infer_type_sub), _looks_like_type_subscript
     )

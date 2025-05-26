@@ -1,13 +1,12 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 from __future__ import annotations
 
-from astroid import arguments, nodes
+from astroid import arguments, inference_tip, nodes
 from astroid.context import InferenceContext
 from astroid.exceptions import UseInferenceDefault
-from astroid.inference_tip import inference_tip
 from astroid.manager import AstroidManager
 
 
@@ -17,14 +16,10 @@ def infer_namespace(node, context: InferenceContext | None = None):
         # Cannot make sense of it.
         raise UseInferenceDefault()
 
-    class_node = nodes.ClassDef(
-        "Namespace",
-        lineno=node.lineno,
-        col_offset=node.col_offset,
-        parent=nodes.SYNTHETIC_ROOT,  # this class is not real
-        end_lineno=node.end_lineno,
-        end_col_offset=node.end_col_offset,
-    )
+    class_node = nodes.ClassDef("Namespace")
+    # Set parent manually until ClassDef constructor fixed:
+    # https://github.com/PyCQA/astroid/issues/1490
+    class_node.parent = node.parent
     for attr in set(callsite.keyword_arguments):
         fake_node = nodes.EmptyNode()
         fake_node.parent = class_node
@@ -44,7 +39,6 @@ def _looks_like_namespace(node) -> bool:
     return False
 
 
-def register(manager: AstroidManager) -> None:
-    manager.register_transform(
-        nodes.Call, inference_tip(infer_namespace), _looks_like_namespace
-    )
+AstroidManager().register_transform(
+    nodes.Call, inference_tip(infer_namespace), _looks_like_namespace
+)

@@ -1,3 +1,2 @@
 -e .
-sphinx~=8.2
-furo==2024.8.6
+sphinx~=5.3

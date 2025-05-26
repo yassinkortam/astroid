@@ -1,16 +1,14 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 from __future__ import annotations
 
 from collections.abc import Iterator
 
-from astroid import bases, context, nodes
+from astroid import bases, context, inference_tip, nodes
 from astroid.builder import _extract_single_node
-from astroid.const import PY313
 from astroid.exceptions import InferenceError, UseInferenceDefault
-from astroid.inference_tip import inference_tip
 from astroid.manager import AstroidManager
 
 PATH_TEMPLATE = """
@@ -29,11 +27,10 @@ def _looks_like_parents_subscript(node: nodes.Subscript) -> bool:
         value = next(node.value.infer())
     except (InferenceError, StopIteration):
         return False
-    parents = "builtins.tuple" if PY313 else "pathlib._PathParents"
     return (
         isinstance(value, bases.Instance)
         and isinstance(value._proxied, nodes.ClassDef)
-        and value.qname() == parents
+        and value.qname() == "pathlib._PathParents"
     )
 
 
@@ -47,9 +44,8 @@ def infer_parents_subscript(
     raise UseInferenceDefault
 
 
-def register(manager: AstroidManager) -> None:
-    manager.register_transform(
-        nodes.Subscript,
-        inference_tip(infer_parents_subscript),
-        _looks_like_parents_subscript,
-    )
+AstroidManager().register_transform(
+    nodes.Subscript,
+    inference_tip(infer_parents_subscript),
+    _looks_like_parents_subscript,
+)

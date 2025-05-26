@@ -1,12 +1,12 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 """Astroid hooks for the PyQT library."""
 
-from astroid import nodes
+from astroid import nodes, parse
 from astroid.brain.helpers import register_module_extender
-from astroid.builder import AstroidBuilder, parse
+from astroid.builder import AstroidBuilder
 from astroid.manager import AstroidManager
 
 
@@ -77,13 +77,12 @@ class QObject(object):
     )
 
 
-def register(manager: AstroidManager) -> None:
-    register_module_extender(manager, "PyQt4.QtCore", pyqt4_qtcore_transform)
-    manager.register_transform(
-        nodes.FunctionDef, transform_pyqt_signal, _looks_like_signal
-    )
-    manager.register_transform(
-        nodes.ClassDef,
-        transform_pyside_signal,
-        lambda node: node.qname() in {"PySide.QtCore.Signal", "PySide2.QtCore.Signal"},
-    )
+register_module_extender(AstroidManager(), "PyQt4.QtCore", pyqt4_qtcore_transform)
+AstroidManager().register_transform(
+    nodes.FunctionDef, transform_pyqt_signal, _looks_like_signal
+)
+AstroidManager().register_transform(
+    nodes.ClassDef,
+    transform_pyside_signal,
+    lambda node: node.qname() in {"PySide.QtCore.Signal", "PySide2.QtCore.Signal"},
+)

@@ -1,26 +1,26 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 import textwrap
 
-from astroid import nodes
 from astroid.brain.helpers import register_module_extender
 from astroid.builder import parse
-from astroid.const import PY310_PLUS, PY311_PLUS
+from astroid.const import PY39_PLUS, PY310_PLUS, PY311_PLUS
 from astroid.manager import AstroidManager
 
 
-def _subprocess_transform() -> nodes.Module:
+def _subprocess_transform():
     communicate = (bytes("string", "ascii"), bytes("string", "ascii"))
     communicate_signature = "def communicate(self, input=None, timeout=None)"
     args = """\
         self, args, bufsize=-1, executable=None, stdin=None, stdout=None, stderr=None,
         preexec_fn=None, close_fds=True, shell=False, cwd=None, env=None,
         universal_newlines=None, startupinfo=None, creationflags=0, restore_signals=True,
-        start_new_session=False, pass_fds=(), *, encoding=None, errors=None, text=None,
-        user=None, group=None, extra_groups=None, umask=-1"""
+        start_new_session=False, pass_fds=(), *, encoding=None, errors=None, text=None"""
 
+    if PY39_PLUS:
+        args += ", user=None, group=None, extra_groups=None, umask=-1"
     if PY310_PLUS:
         args += ", pipesize=-1"
     if PY311_PLUS:
@@ -87,11 +87,14 @@ def _subprocess_transform() -> nodes.Module:
         def kill(self):
             pass
         {ctx_manager}
-        @classmethod
-        def __class_getitem__(cls, item):
-            pass
-        """
+       """
     )
+    if PY39_PLUS:
+        code += """
+    @classmethod
+    def __class_getitem__(cls, item):
+        pass
+        """
 
     init_lines = textwrap.dedent(init).splitlines()
     indented_init = "\n".join(" " * 4 + line for line in init_lines)
@@ -99,5 +102,4 @@ def _subprocess_transform() -> nodes.Module:
     return parse(code)
 
 
-def register(manager: AstroidManager) -> None:
-    register_module_extender(manager, "subprocess", _subprocess_transform)
+register_module_extender(AstroidManager(), "subprocess", _subprocess_transform)

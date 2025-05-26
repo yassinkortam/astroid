@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 import sys
 import textwrap
@@ -9,12 +9,11 @@ from unittest import mock
 
 import pytest
 
-from astroid import MANAGER, Instance, bases, manager, nodes, parse, test_utils
+from astroid import MANAGER, Instance, bases, nodes, parse, test_utils
 from astroid.builder import AstroidBuilder, _extract_single_node, extract_node
-from astroid.const import PY312_PLUS
+from astroid.const import PY38_PLUS
 from astroid.context import InferenceContext
 from astroid.exceptions import InferenceError
-from astroid.manager import AstroidManager
 from astroid.raw_building import build_module
 from astroid.util import Uninferable
 
@@ -28,34 +27,15 @@ else:
     HAS_NUMPY = True
 
 
-class NonRegressionTests(unittest.TestCase):
+class NonRegressionTests(resources.AstroidCacheSetupMixin, unittest.TestCase):
     def setUp(self) -> None:
         sys.path.insert(0, resources.find("data"))
         MANAGER.always_load_extensions = True
-        self.addCleanup(MANAGER.clear_cache)
 
     def tearDown(self) -> None:
         MANAGER.always_load_extensions = False
         sys.path.pop(0)
         sys.path_importer_cache.pop(resources.find("data"), None)
-
-    def test_manager_instance_attributes_reference_global_MANAGER(self) -> None:
-        for expected in (True, False):
-            with mock.patch.dict(
-                manager.AstroidManager.brain,
-                values={"always_load_extensions": expected},
-            ):
-                assert (
-                    MANAGER.always_load_extensions
-                    == manager.AstroidManager.brain["always_load_extensions"]
-                )
-            with mock.patch.dict(
-                manager.AstroidManager.brain,
-                values={"optimize_ast": expected},
-            ):
-                assert (
-                    MANAGER.optimize_ast == manager.AstroidManager.brain["optimize_ast"]
-                )
 
     def test_module_path(self) -> None:
         man = test_utils.brainless_manager()
@@ -70,9 +50,9 @@ class NonRegressionTests(unittest.TestCase):
         self.assertEqual(module.name, "package.subpackage.module")
 
     def test_package_sidepackage(self) -> None:
-        brainless_manager = test_utils.brainless_manager()
+        manager = test_utils.brainless_manager()
         assert "package.sidepackage" not in MANAGER.astroid_cache
-        package = brainless_manager.ast_from_module_name("absimp")
+        package = manager.ast_from_module_name("absimp")
         self.assertIsInstance(package, nodes.Module)
         self.assertTrue(package.package)
         subpackage = next(package.getattr("sidepackage")[0].infer())
@@ -81,7 +61,7 @@ class NonRegressionTests(unittest.TestCase):
         self.assertEqual(subpackage.name, "absimp.sidepackage")
 
     def test_living_property(self) -> None:
-        builder = AstroidBuilder(AstroidManager())
+        builder = AstroidBuilder()
         builder._done = {}
         builder._module = sys.modules[__name__]
         builder.object_build(build_module("module_name", ""), Whatever)
@@ -91,7 +71,7 @@ class NonRegressionTests(unittest.TestCase):
         """Test don't crash on numpy."""
         # a crash occurred somewhere in the past, and an
         # InferenceError instead of a crash was better, but now we even infer!
-        builder = AstroidBuilder(AstroidManager())
+        builder = AstroidBuilder()
         data = """
 from numpy import multiply
 
@@ -102,7 +82,7 @@ multiply([1, 2], [3, 4])
         inferred = callfunc.inferred()
         self.assertEqual(len(inferred), 1)
 
-    @unittest.skipUnless(HAS_NUMPY and not PY312_PLUS, "Needs numpy and < Python 3.12")
+    @unittest.skipUnless(HAS_NUMPY, "Needs numpy")
     def test_numpy_distutils(self):
         """Special handling of virtualenv's patching of distutils shouldn't interfere
         with numpy.distutils.
@@ -121,14 +101,14 @@ is_sequence("ABC") #@
 
     def test_nameconstant(self) -> None:
         # used to fail for Python 3.4
-        builder = AstroidBuilder(AstroidManager())
+        builder = AstroidBuilder()
         astroid = builder.string_build("def test(x=True): pass")
         default = astroid.body[0].args.args[0]
         self.assertEqual(default.name, "x")
         self.assertEqual(next(default.infer()).value, True)
 
     def test_recursion_regression_issue25(self) -> None:
-        builder = AstroidBuilder(AstroidManager())
+        builder = AstroidBuilder()
         data = """
 import recursion as base
 
@@ -146,10 +126,10 @@ def run():
         classes = astroid.nodes_of_class(nodes.ClassDef)
         for klass in classes:
             # triggers the _is_metaclass call
-            klass.type  # pylint: disable=pointless-statement  # noqa: B018
+            klass.type  # pylint: disable=pointless-statement
 
     def test_decorator_callchain_issue42(self) -> None:
-        builder = AstroidBuilder(AstroidManager())
+        builder = AstroidBuilder()
         data = """
 
 def test():
@@ -167,7 +147,7 @@ def crash():
         self.assertEqual(astroid["crash"].type, "function")
 
     def test_filter_stmts_scoping(self) -> None:
-        builder = AstroidBuilder(AstroidManager())
+        builder = AstroidBuilder()
         data = """
 def test():
     compiler = int()
@@ -183,8 +163,9 @@ def test():
         base = next(result._proxied.bases[0].infer())
         self.assertEqual(base.name, "int")
 
+    @pytest.mark.skipif(not PY38_PLUS, reason="needs assignment expressions")
     def test_filter_stmts_nested_if(self) -> None:
-        builder = AstroidBuilder(AstroidManager())
+        builder = AstroidBuilder()
         data = """
 def test(val):
     variable = None
@@ -215,7 +196,7 @@ def test(val):
         assert result[2].lineno == 12
 
     def test_ancestors_patching_class_recursion(self) -> None:
-        node = AstroidBuilder(AstroidManager()).string_build(
+        node = AstroidBuilder().string_build(
             textwrap.dedent(
                 """
         import string
@@ -249,7 +230,7 @@ def test(val):
             class metaclass(meta):
                 def __new__(cls, name, this_bases, d):
                     return meta(name, bases, d)
-            return type.__new__(metaclass, 'temporary_class', (), {})
+        return type.__new__(metaclass, 'temporary_class', (), {})
 
         import lala
 
@@ -357,27 +338,6 @@ def test(val):
         assert isinstance(inferred, Instance)
         assert inferred.qname() == ".A"
 
-    def test_inference_context_consideration(self) -> None:
-        """https://github.com/PyCQA/astroid/issues/1828"""
-        code = """
-        class Base:
-            def return_type(self):
-                return type(self)()
-        class A(Base):
-            def method(self):
-                return self.return_type()
-        class B(Base):
-            def method(self):
-                return self.return_type()
-        A().method() #@
-        B().method() #@
-        """
-        node1, node2 = extract_node(code)
-        inferred1 = next(node1.infer())
-        assert inferred1.qname() == ".A"
-        inferred2 = next(node2.infer())
-        assert inferred2.qname() == ".B"
-
 
 class Whatever:
     a = property(lambda x: x, lambda x: x)  # type: ignore[misc]
@@ -415,7 +375,7 @@ def test_crash_in_dunder_inference_prevented() -> None:
 
 def test_regression_crash_classmethod() -> None:
     """Regression test for a crash reported in
-    https://github.com/pylint-dev/pylint/issues/4982.
+    https://github.com/PyCQA/pylint/issues/4982.
     """
     code = """
     class Base:
@@ -437,7 +397,7 @@ def test_regression_crash_classmethod() -> None:
 
 def test_max_inferred_for_complicated_class_hierarchy() -> None:
     """Regression test for a crash reported in
-    https://github.com/pylint-dev/pylint/issues/5679.
+    https://github.com/PyCQA/pylint/issues/5679.
 
     The class hierarchy of 'sqlalchemy' is so intricate that it becomes uninferable with
     the standard max_inferred of 100. We used to crash when this happened.
@@ -479,67 +439,3 @@ def test_recursion_during_inference(mocked) -> None:
     with pytest.raises(InferenceError) as error:
         next(node.infer())
     assert error.value.message.startswith("RecursionError raised")
-
-
-def test_regression_missing_callcontext() -> None:
-    node: nodes.Attribute = _extract_single_node(
-        textwrap.dedent(
-            """
-        import functools
-
-        class MockClass:
-            def _get_option(self, option):
-                return "mystr"
-
-            enabled = property(functools.partial(_get_option, option='myopt'))
-
-        MockClass().enabled
-        """
-        )
-    )
-    assert node.inferred()[0].value == "mystr"
-
-
-def test_regression_root_is_not_a_module() -> None:
-    """Regression test for #2672."""
-    node: nodes.ClassDef = _extract_single_node(
-        textwrap.dedent(
-            """
-        a=eval.__get__(1).__gt__
-
-        @a
-        class c: ...
-        """
-        )
-    )
-    assert node.name == "c"
-
-
-@pytest.mark.xfail(reason="Not fixed yet")
-def test_regression_eval_get_of_arg() -> None:
-    """Regression test for #2743"""
-    node = _extract_single_node("eval.__get__(1)")
-    with pytest.raises(InferenceError):
-        next(node.infer())
-
-
-def test_regression_no_crash_during_build() -> None:
-    node: nodes.Attribute = extract_node("__()")
-    assert node.args == []
-    assert node.as_string() == "__()"
-
-
-def test_regression_no_crash_on_called_slice() -> None:
-    """Regression test for issue #2721."""
-    node: nodes.Attribute = extract_node(
-        textwrap.dedent(
-            """
-        s = slice(-2)
-        @s()
-        @six.add_metaclass()
-        class a: ...
-        """
-        )
-    )
-    assert isinstance(node, nodes.ClassDef)
-    assert node.name == "a"

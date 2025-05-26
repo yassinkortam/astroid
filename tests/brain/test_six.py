@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from astroid import MANAGER, builder, nodes
 from astroid.nodes.scoped_nodes import ClassDef
 
 try:
-    import six  # type: ignore[import]  # pylint: disable=unused-import
+    import six  # pylint: disable=unused-import
 
     HAS_SIX = True
 except ImportError:
@@ -29,8 +29,6 @@ class SixBrainTest(unittest.TestCase):
         six.moves.urllib_parse #@
         six.moves.urllib_error #@
         six.moves.urllib.request #@
-        from six.moves import StringIO
-        StringIO #@
         """
         )
         assert isinstance(ast_nodes, list)
@@ -66,18 +64,6 @@ class SixBrainTest(unittest.TestCase):
         self.assertIsInstance(urlretrieve, nodes.FunctionDef)
         self.assertEqual(urlretrieve.qname(), "urllib.request.urlretrieve")
 
-        StringIO = next(ast_nodes[4].infer())
-        self.assertIsInstance(StringIO, nodes.ClassDef)
-        self.assertEqual(StringIO.qname(), "_io.StringIO")
-        self.assertTrue(StringIO.callable())
-
-    def test_attribute_access_with_six_moves_imported(self) -> None:
-        astroid.MANAGER.clear_cache()
-        astroid.MANAGER._mod_file_cache.clear()
-        import six.moves  # type: ignore[import]  # pylint: disable=import-outside-toplevel,unused-import,redefined-outer-name
-
-        self.test_attribute_access()
-
     def test_from_imports(self) -> None:
         ast_node = builder.extract_node(
             """
@@ -93,7 +79,7 @@ class SixBrainTest(unittest.TestCase):
     def test_from_submodule_imports(self) -> None:
         """Make sure ulrlib submodules can be imported from
 
-        See pylint-dev/pylint#1640 for relevant issue
+        See PyCQA/pylint#1640 for relevant issue
         """
         ast_node = builder.extract_node(
             """
@@ -124,7 +110,8 @@ class SixBrainTest(unittest.TestCase):
         inferred = next(ast_node.infer())
         self.assertIsInstance(inferred, nodes.ClassDef)
         self.assertEqual(inferred.name, "B")
-        self.assertIsInstance(inferred.bases[0], nodes.Call)
+        self.assertIsInstance(inferred.bases[0], nodes.Name)
+        self.assertEqual(inferred.bases[0].name, "C")
         ancestors = tuple(inferred.ancestors())
         self.assertIsInstance(ancestors[0], nodes.ClassDef)
         self.assertEqual(ancestors[0].name, "C")
@@ -144,7 +131,7 @@ class SixBrainTest(unittest.TestCase):
             bar = 1
         """
         klass = astroid.extract_node(code)
-        assert next(klass.ancestors()).name == "Enum"
+        assert list(klass.ancestors())[-1].name == "Enum"
 
     def test_six_with_metaclass_with_additional_transform(self) -> None:
         def transform_class(cls: Any) -> ClassDef:

@@ -1,14 +1,13 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
-from astroid import nodes
 from astroid.brain.helpers import register_module_extender
 from astroid.builder import parse
 from astroid.manager import AstroidManager
 
 
-def _re_transform() -> nodes.Module:
+def _re_transform():
     return parse(
         """
     from collections import namedtuple
@@ -23,5 +22,4 @@ def _re_transform() -> nodes.Module:
     )
 
 
-def register(manager: AstroidManager) -> None:
-    register_module_extender(manager, "crypt", _re_transform)
+register_module_extender(AstroidManager(), "crypt", _re_transform)

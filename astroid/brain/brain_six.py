@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 """Astroid hooks for six module."""
 
@@ -182,11 +182,7 @@ def transform_six_add_metaclass(node):  # pylint: disable=inconsistent-return-st
             func = next(decorator.func.infer())
         except (InferenceError, StopIteration):
             continue
-        if (
-            isinstance(func, (nodes.FunctionDef, nodes.ClassDef))
-            and func.qname() == SIX_ADD_METACLASS
-            and decorator.args
-        ):
+        if func.qname() == SIX_ADD_METACLASS and decorator.args:
             metaclass = decorator.args[0]
             node._metaclass = metaclass
             return node
@@ -223,22 +219,22 @@ def transform_six_with_metaclass(node):
     """
     call = node.bases[0]
     node._metaclass = call.args[0]
+    node.bases = call.args[1:]
     return node
 
 
-def register(manager: AstroidManager) -> None:
-    register_module_extender(manager, "six", six_moves_transform)
-    register_module_extender(
-        manager, "requests.packages.urllib3.packages.six", six_moves_transform
-    )
-    manager.register_failed_import_hook(_six_fail_hook)
-    manager.register_transform(
-        nodes.ClassDef,
-        transform_six_add_metaclass,
-        _looks_like_decorated_with_six_add_metaclass,
-    )
-    manager.register_transform(
-        nodes.ClassDef,
-        transform_six_with_metaclass,
-        _looks_like_nested_from_six_with_metaclass,
-    )
+register_module_extender(AstroidManager(), "six", six_moves_transform)
+register_module_extender(
+    AstroidManager(), "requests.packages.urllib3.packages.six", six_moves_transform
+)
+AstroidManager().register_failed_import_hook(_six_fail_hook)
+AstroidManager().register_transform(
+    nodes.ClassDef,
+    transform_six_add_metaclass,
+    _looks_like_decorated_with_six_add_metaclass,
+)
+AstroidManager().register_transform(
+    nodes.ClassDef,
+    transform_six_with_metaclass,
+    _looks_like_nested_from_six_with_metaclass,
+)

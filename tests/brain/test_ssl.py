@@ -1,13 +1,10 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 """Tests for the ssl brain."""
 
-import pytest
-
 from astroid import bases, nodes, parse
-from astroid.const import PY312_PLUS
 
 
 def test_ssl_brain() -> None:
@@ -44,21 +41,3 @@ def test_ssl_brain() -> None:
     inferred_cert_required = next(module.body[4].value.infer())
     assert isinstance(inferred_cert_required, bases.Instance)
     assert inferred_cert_required._proxied.name == "CERT_REQUIRED"
-
-
-@pytest.mark.skipif(not PY312_PLUS, reason="Uses new 3.12 constant")
-def test_ssl_brain_py312() -> None:
-    """Test ssl brain transform."""
-    module = parse(
-        """
-    import ssl
-    ssl.OP_LEGACY_SERVER_CONNECT
-    ssl.Options.OP_LEGACY_SERVER_CONNECT
-    """
-    )
-
-    inferred_constant = next(module.body[1].value.infer())
-    assert isinstance(inferred_constant, nodes.Const)
-
-    inferred_instance = next(module.body[2].value.infer())
-    assert isinstance(inferred_instance, bases.Instance)

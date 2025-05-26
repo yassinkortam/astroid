@@ -1,17 +1,17 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 """Astroid hooks for understanding ``boto3.ServiceRequest()``."""
 
-from astroid.builder import extract_node
+from astroid import extract_node
 from astroid.manager import AstroidManager
 from astroid.nodes.scoped_nodes import ClassDef
 
 BOTO_SERVICE_FACTORY_QUALIFIED_NAME = "boto3.resources.base.ServiceResource"
 
 
-def service_request_transform(node: ClassDef) -> ClassDef:
+def service_request_transform(node):
     """Transform ServiceResource to look like dynamic classes."""
     code = """
     def __getattr__(self, attr):
@@ -22,11 +22,10 @@ def service_request_transform(node: ClassDef) -> ClassDef:
     return node
 
 
-def _looks_like_boto3_service_request(node: ClassDef) -> bool:
+def _looks_like_boto3_service_request(node) -> bool:
     return node.qname() == BOTO_SERVICE_FACTORY_QUALIFIED_NAME
 
 
-def register(manager: AstroidManager) -> None:
-    manager.register_transform(
-        ClassDef, service_request_transform, _looks_like_boto3_service_request
-    )
+AstroidManager().register_transform(
+    ClassDef, service_request_transform, _looks_like_boto3_service_request
+)

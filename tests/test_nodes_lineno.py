@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 import textwrap
 
@@ -8,9 +8,44 @@ import pytest
 
 import astroid
 from astroid import builder, nodes
-from astroid.const import PY310_PLUS, PY312_PLUS
+from astroid.const import IS_PYPY, PY38, PY38_PLUS, PY39_PLUS, PY310_PLUS
 
 
+@pytest.mark.skipif(
+    PY38_PLUS and not (PY38 and IS_PYPY),
+    reason="end_lineno and end_col_offset were added in PY38",
+)
+class TestEndLinenoNotSet:
+    """Test 'end_lineno' and 'end_col_offset' are initialized as 'None' for Python <
+    3.8.
+    """
+
+    @staticmethod
+    def test_end_lineno_not_set() -> None:
+        code = textwrap.dedent(
+            """
+        [1, 2, 3]  #@
+        var  #@
+        """
+        ).strip()
+        ast_nodes = builder.extract_node(code)
+        assert isinstance(ast_nodes, list) and len(ast_nodes) == 2
+
+        n1 = ast_nodes[0]
+        assert isinstance(n1, nodes.List)
+        assert (n1.lineno, n1.col_offset) == (1, 0)
+        assert (n1.end_lineno, n1.end_col_offset) == (None, None)
+
+        n2 = ast_nodes[1]
+        assert isinstance(n2, nodes.Name)
+        assert (n2.lineno, n2.col_offset) == (2, 0)
+        assert (n2.end_lineno, n2.end_col_offset) == (None, None)
+
+
+@pytest.mark.skipif(
+    not PY38_PLUS or PY38 and IS_PYPY,
+    reason="end_lineno and end_col_offset were added in PY38",
+)
 class TestLinenoColOffset:
     """Test 'lineno', 'col_offset', 'end_lineno', and 'end_col_offset' for all
     nodes.
@@ -165,8 +200,13 @@ class TestLinenoColOffset:
         assert (c1.args[0].end_lineno, c1.args[0].end_col_offset) == (1, 9)
 
         # fmt: off
-        assert (c1.keywords[0].lineno, c1.keywords[0].col_offset) == (1, 11)
-        assert (c1.keywords[0].end_lineno, c1.keywords[0].end_col_offset) == (1, 21)
+        if PY39_PLUS:
+            # 'lineno' and 'col_offset' information only added in Python 3.9
+            assert (c1.keywords[0].lineno, c1.keywords[0].col_offset) == (1, 11)
+            assert (c1.keywords[0].end_lineno, c1.keywords[0].end_col_offset) == (1, 21)
+        else:
+            assert (c1.keywords[0].lineno, c1.keywords[0].col_offset) == (None, None)
+            assert (c1.keywords[0].end_lineno, c1.keywords[0].end_col_offset) == (None, None)
         assert (c1.keywords[0].value.lineno, c1.keywords[0].value.col_offset) == (1, 16)
         assert (c1.keywords[0].value.end_lineno, c1.keywords[0].value.end_col_offset) == (1, 21)
         # fmt: on
@@ -557,7 +597,6 @@ class TestLinenoColOffset:
     @staticmethod
     def test_end_lineno_function() -> None:
         """FunctionDef, AsyncFunctionDef, Decorators, Lambda, Arguments."""
-        # pylint: disable = too-many-statements
         code = textwrap.dedent(
             """
         def func(  #@
@@ -698,7 +737,7 @@ class TestLinenoColOffset:
 
     @staticmethod
     def test_end_lineno_try() -> None:
-        """Try, ExceptHandler."""
+        """TryExcept, TryFinally, ExceptHandler."""
         code = textwrap.dedent(
             """
         try:  #@
@@ -724,7 +763,7 @@ class TestLinenoColOffset:
         assert isinstance(ast_nodes, list) and len(ast_nodes) == 2
 
         t1 = ast_nodes[0]
-        assert isinstance(t1, nodes.Try)
+        assert isinstance(t1, nodes.TryExcept)
         assert isinstance(t1.body[0], nodes.Pass)
         assert isinstance(t1.orelse[0], nodes.Pass)
         assert (t1.lineno, t1.col_offset) == (1, 0)
@@ -750,12 +789,13 @@ class TestLinenoColOffset:
         assert (t2.body[0].end_lineno, t2.body[0].end_col_offset) == (4, 8)
 
         t3 = ast_nodes[1]
-        assert isinstance(t3, nodes.Try)
+        assert isinstance(t3, nodes.TryFinally)
+        assert isinstance(t3.body[0], nodes.TryExcept)
         assert isinstance(t3.finalbody[0], nodes.Pass)
         assert (t3.lineno, t3.col_offset) == (10, 0)
         assert (t3.end_lineno, t3.end_col_offset) == (17, 8)
-        assert (t3.body[0].lineno, t3.body[0].col_offset) == (11, 4)
-        assert (t3.body[0].end_lineno, t3.body[0].end_col_offset) == (11, 8)
+        assert (t3.body[0].lineno, t3.body[0].col_offset) == (10, 0)
+        assert (t3.body[0].end_lineno, t3.body[0].end_col_offset) == (15, 8)
         assert (t3.finalbody[0].lineno, t3.finalbody[0].col_offset) == (17, 4)
         assert (t3.finalbody[0].end_lineno, t3.finalbody[0].end_col_offset) == (17, 8)
 
@@ -803,8 +843,13 @@ class TestLinenoColOffset:
         assert isinstance(s3.slice, nodes.Tuple)
         assert (s3.lineno, s3.col_offset) == (3, 0)
         assert (s3.end_lineno, s3.end_col_offset) == (3, 11)
-        assert (s3.slice.lineno, s3.slice.col_offset) == (3, 4)
-        assert (s3.slice.end_lineno, s3.slice.end_col_offset) == (3, 10)
+        if PY39_PLUS:
+            # 'lineno' and 'col_offset' information only added in Python 3.9
+            assert (s3.slice.lineno, s3.slice.col_offset) == (3, 4)
+            assert (s3.slice.end_lineno, s3.slice.end_col_offset) == (3, 10)
+        else:
+            assert (s3.slice.lineno, s3.slice.col_offset) == (None, None)
+            assert (s3.slice.end_lineno, s3.slice.end_col_offset) == (None, None)
 
     @staticmethod
     def test_end_lineno_import() -> None:
@@ -932,59 +977,47 @@ class TestLinenoColOffset:
         assert isinstance(s1.values[0], nodes.Const)
         assert (s1.lineno, s1.col_offset) == (1, 0)
         assert (s1.end_lineno, s1.end_col_offset) == (1, 29)
-        if PY312_PLUS:
-            assert (s1.values[0].lineno, s1.values[0].col_offset) == (1, 2)
-            assert (s1.values[0].end_lineno, s1.values[0].end_col_offset) == (1, 15)
-        else:
-            # Bug in Python 3.11
-            # https://github.com/python/cpython/issues/81639
-            assert (s1.values[0].lineno, s1.values[0].col_offset) == (1, 0)
-            assert (s1.values[0].end_lineno, s1.values[0].end_col_offset) == (1, 29)
+        assert (s1.values[0].lineno, s1.values[0].col_offset) == (1, 0)
+        assert (s1.values[0].end_lineno, s1.values[0].end_col_offset) == (1, 29)
 
         s2 = s1.values[1]
         assert isinstance(s2, nodes.FormattedValue)
-        if PY312_PLUS:
-            assert (s2.lineno, s2.col_offset) == (1, 15)
-            assert (s2.end_lineno, s2.end_col_offset) == (1, 28)
-        else:
-            assert (s2.lineno, s2.col_offset) == (1, 0)
-            assert (s2.end_lineno, s2.end_col_offset) == (1, 29)
-
+        assert (s2.lineno, s2.col_offset) == (1, 0)
+        assert (s2.end_lineno, s2.end_col_offset) == (1, 29)
         assert isinstance(s2.value, nodes.Const)  # 42.1234
-        assert (s2.value.lineno, s2.value.col_offset) == (1, 16)
-        assert (s2.value.end_lineno, s2.value.end_col_offset) == (1, 23)
-        assert isinstance(s2.format_spec, nodes.JoinedStr)  # ':02d'
-        if PY312_PLUS:
-            assert (s2.format_spec.lineno, s2.format_spec.col_offset) == (1, 23)
-            assert (s2.format_spec.end_lineno, s2.format_spec.end_col_offset) == (1, 27)
+        if PY39_PLUS:
+            assert (s2.value.lineno, s2.value.col_offset) == (1, 16)
+            assert (s2.value.end_lineno, s2.value.end_col_offset) == (1, 23)
         else:
-            assert (s2.format_spec.lineno, s2.format_spec.col_offset) == (1, 0)
-            assert (s2.format_spec.end_lineno, s2.format_spec.end_col_offset) == (1, 29)
+            # Bug in Python 3.8
+            # https://bugs.python.org/issue44885
+            assert (s2.value.lineno, s2.value.col_offset) == (1, 1)
+            assert (s2.value.end_lineno, s2.value.end_col_offset) == (1, 8)
+        assert isinstance(s2.format_spec, nodes.JoinedStr)  # '02d'
+        assert (s2.format_spec.lineno, s2.format_spec.col_offset) == (1, 0)
+        assert (s2.format_spec.end_lineno, s2.format_spec.end_col_offset) == (1, 29)
 
         s3 = ast_nodes[1]
         assert isinstance(s3, nodes.JoinedStr)
         assert isinstance(s3.values[0], nodes.Const)
         assert (s3.lineno, s3.col_offset) == (2, 0)
         assert (s3.end_lineno, s3.end_col_offset) == (2, 17)
-        if PY312_PLUS:
-            assert (s3.values[0].lineno, s3.values[0].col_offset) == (2, 2)
-            assert (s3.values[0].end_lineno, s3.values[0].end_col_offset) == (2, 15)
-        else:
-            assert (s3.values[0].lineno, s3.values[0].col_offset) == (2, 0)
-            assert (s3.values[0].end_lineno, s3.values[0].end_col_offset) == (2, 17)
+        assert (s3.values[0].lineno, s3.values[0].col_offset) == (2, 0)
+        assert (s3.values[0].end_lineno, s3.values[0].end_col_offset) == (2, 17)
 
         s4 = s3.values[1]
         assert isinstance(s4, nodes.FormattedValue)
-        if PY312_PLUS:
-            assert (s4.lineno, s4.col_offset) == (2, 9)
-            assert (s4.end_lineno, s4.end_col_offset) == (2, 16)
-        else:
-            assert (s4.lineno, s4.col_offset) == (2, 0)
-            assert (s4.end_lineno, s4.end_col_offset) == (2, 17)
-
+        assert (s4.lineno, s4.col_offset) == (2, 0)
+        assert (s4.end_lineno, s4.end_col_offset) == (2, 17)
         assert isinstance(s4.value, nodes.Name)  # 'name'
-        assert (s4.value.lineno, s4.value.col_offset) == (2, 10)
-        assert (s4.value.end_lineno, s4.value.end_col_offset) == (2, 14)
+        if PY39_PLUS:
+            assert (s4.value.lineno, s4.value.col_offset) == (2, 10)
+            assert (s4.value.end_lineno, s4.value.end_col_offset) == (2, 14)
+        else:
+            # Bug in Python 3.8
+            # https://bugs.python.org/issue44885
+            assert (s4.value.lineno, s4.value.col_offset) == (2, 1)
+            assert (s4.value.end_lineno, s4.value.end_col_offset) == (2, 5)
 
     @staticmethod
     @pytest.mark.skipif(not PY310_PLUS, reason="pattern matching was added in PY310")
@@ -992,7 +1025,6 @@ class TestLinenoColOffset:
         """Match, MatchValue, MatchSingleton, MatchSequence, MatchMapping,
         MatchClass, MatchStar, MatchOr, MatchAs.
         """
-        # pylint: disable = too-many-statements
         code = textwrap.dedent(
             """
         match x:  #@
@@ -1191,8 +1223,13 @@ class TestLinenoColOffset:
         assert (c1.decorators.end_lineno, c1.decorators.end_col_offset) == (2, 11)
         assert (c1.bases[0].lineno, c1.bases[0].col_offset) == (3, 8)
         assert (c1.bases[0].end_lineno, c1.bases[0].end_col_offset) == (3, 14)
-        assert (c1.keywords[0].lineno, c1.keywords[0].col_offset) == (3, 16)
-        assert (c1.keywords[0].end_lineno, c1.keywords[0].end_col_offset) == (3, 22)
+        if PY39_PLUS:
+            # 'lineno' and 'col_offset' information only added in Python 3.9
+            assert (c1.keywords[0].lineno, c1.keywords[0].col_offset) == (3, 16)
+            assert (c1.keywords[0].end_lineno, c1.keywords[0].end_col_offset) == (3, 22)
+        else:
+            assert (c1.keywords[0].lineno, c1.keywords[0].col_offset) == (None, None)
+            assert (c1.keywords[0].end_lineno, c1.keywords[0].end_col_offset) == (None, None)
         assert (c1.body[0].lineno, c1.body[0].col_offset) == (4, 4)
         assert (c1.body[0].end_lineno, c1.body[0].end_col_offset) == (4, 8)
         # fmt: on
@@ -1204,6 +1241,6 @@ class TestLinenoColOffset:
         module = astroid.parse(code)
         assert isinstance(module, nodes.Module)
         assert module.lineno == 0
-        assert module.col_offset == 0
+        assert module.col_offset is None
         assert module.end_lineno is None
         assert module.end_col_offset is None

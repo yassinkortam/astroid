@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 import unittest
 from textwrap import dedent
@@ -9,13 +9,13 @@ import pytest
 
 from astroid import exceptions, nodes
 from astroid.builder import AstroidBuilder, extract_node
-from astroid.manager import AstroidManager
+from astroid.test_utils import require_version
 
 
 class Python3TC(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.builder = AstroidBuilder(AstroidManager())
+        cls.builder = AstroidBuilder()
 
     def test_starred_notation(self) -> None:
         astroid = self.builder.string_build("*a, b = [1, 2, 3]", "test", "test")
@@ -156,6 +156,7 @@ class Python3TC(unittest.TestCase):
             )
         )
         klass = astroid["SubTest"]
+        self.assertTrue(klass.newstyle)
         metaclass = klass.metaclass()
         self.assertIsInstance(metaclass, nodes.ClassDef)
         self.assertEqual(metaclass.name, "ABCMeta")
@@ -350,6 +351,7 @@ class Python3TC(unittest.TestCase):
         for comp in non_async_comprehensions:
             self.assertFalse(comp.generators[0].is_async)
 
+    @require_version("3.7")
     def test_async_comprehensions_outside_coroutine(self):
         # When async and await will become keywords, async comprehensions
         # will be allowed outside of coroutines body

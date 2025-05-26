@@ -1,15 +1,14 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 """Astroid hooks for pytest."""
-from astroid import nodes
 from astroid.brain.helpers import register_module_extender
 from astroid.builder import AstroidBuilder
 from astroid.manager import AstroidManager
 
 
-def pytest_transform() -> nodes.Module:
+def pytest_transform():
     return AstroidBuilder(AstroidManager()).string_build(
         """
 
@@ -80,6 +79,5 @@ except ImportError:
     )
 
 
-def register(manager: AstroidManager) -> None:
-    register_module_extender(manager, "pytest", pytest_transform)
-    register_module_extender(manager, "py.test", pytest_transform)
+register_module_extender(AstroidManager(), "pytest", pytest_transform)
+register_module_extender(AstroidManager(), "py.test", pytest_transform)

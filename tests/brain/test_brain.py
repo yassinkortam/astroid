@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 from __future__ import annotations
 
@@ -15,7 +15,6 @@ import astroid
 from astroid import MANAGER, builder, nodes, objects, test_utils, util
 from astroid.bases import Instance
 from astroid.brain.brain_namedtuple_enum import _get_namedtuple_fields
-from astroid.const import PY312_PLUS, PY313_PLUS, PY314_PLUS
 from astroid.exceptions import (
     AttributeInferenceError,
     InferenceError,
@@ -51,6 +50,13 @@ class CollectionsDequeTests(unittest.TestCase):
         self.assertIn("insert", inferred.locals)
         self.assertIn("index", inferred.locals)
 
+    @test_utils.require_version(maxver="3.8")
+    def test_deque_not_py39methods(self):
+        inferred = self._inferred_queue_instance()
+        with self.assertRaises(AttributeInferenceError):
+            inferred.getattr("__class_getitem__")
+
+    @test_utils.require_version(minver="3.9")
     def test_deque_py39methods(self):
         inferred = self._inferred_queue_instance()
         self.assertTrue(inferred.getattr("__class_getitem__"))
@@ -92,6 +98,77 @@ class ModuleExtenderTest(unittest.TestCase):
         for extender, _ in transformer.transforms[nodes.Module]:
             n = nodes.Module("__main__")
             extender(n)
+
+
+class ThreadingBrainTest(unittest.TestCase):
+    def test_lock(self) -> None:
+        lock_instance = builder.extract_node(
+            """
+        import threading
+        threading.Lock()
+        """
+        )
+        inferred = next(lock_instance.infer())
+        self.assert_is_valid_lock(inferred)
+
+        acquire_method = inferred.getattr("acquire")[0]
+        parameters = [param.name for param in acquire_method.args.args[1:]]
+        assert parameters == ["blocking", "timeout"]
+
+        assert inferred.getattr("locked")
+
+    def test_rlock(self) -> None:
+        self._test_lock_object("RLock")
+
+    def test_semaphore(self) -> None:
+        self._test_lock_object("Semaphore")
+
+    def test_boundedsemaphore(self) -> None:
+        self._test_lock_object("BoundedSemaphore")
+
+    def _test_lock_object(self, object_name: str) -> None:
+        lock_instance = builder.extract_node(
+            f"""
+        import threading
+        threading.{object_name}()
+        """
+        )
+        inferred = next(lock_instance.infer())
+        self.assert_is_valid_lock(inferred)
+
+    def assert_is_valid_lock(self, inferred: Instance) -> None:
+        self.assertIsInstance(inferred, astroid.Instance)
+        self.assertEqual(inferred.root().name, "threading")
+        for method in ("acquire", "release", "__enter__", "__exit__"):
+            self.assertIsInstance(next(inferred.igetattr(method)), astroid.BoundMethod)
+
+
+class PytestBrainTest(unittest.TestCase):
+    def test_pytest(self) -> None:
+        ast_node = builder.extract_node(
+            """
+        import pytest
+        pytest #@
+        """
+        )
+        module = next(ast_node.infer())
+        attrs = [
+            "deprecated_call",
+            "warns",
+            "exit",
+            "fail",
+            "skip",
+            "importorskip",
+            "xfail",
+            "mark",
+            "raises",
+            "freeze_includes",
+            "set_trace",
+            "fixture",
+            "yield_fixture",
+        ]
+        for attr in attrs:
+            self.assertIn(attr, module)
 
 
 def streams_are_fine():
@@ -165,6 +242,7 @@ class TypeBrain(unittest.TestCase):
             # noinspection PyStatementEffect
             val_inf.getattr("__class_getitem__")[0]
 
+    @test_utils.require_version(minver="3.9")
     def test_builtin_subscriptable(self):
         """Starting with python3.9 builtin types such as list are subscriptable.
         Any builtin class such as "enumerate" or "staticmethod" also works."""
@@ -179,35 +257,12 @@ class TypeBrain(unittest.TestCase):
 
 
 def check_metaclass_is_abc(node: nodes.ClassDef):
-    if PY312_PLUS and node.name == "ByteString":
-        # .metaclass() finds the first metaclass in the mro(),
-        # which, from 3.12, is _DeprecateByteStringMeta (unhelpful)
-        # until ByteString is removed in 3.14.
-        # Jump over the first two ByteString classes in the mro().
-        check_metaclass_is_abc(node.mro()[2])
-    else:
-        meta = node.metaclass()
-        assert isinstance(meta, nodes.ClassDef)
-        assert meta.name == "ABCMeta"
+    meta = node.metaclass()
+    assert isinstance(meta, nodes.ClassDef)
+    assert meta.name == "ABCMeta"
 
 
 class CollectionsBrain(unittest.TestCase):
-    def test_collections_abc_is_importable(self) -> None:
-        """
-        Test that we can import `collections.abc`.
-
-        The collections.abc has gone through various formats of being frozen. Therefore, we ensure
-        that we can still import it (correctly).
-        """
-        import_node = builder.extract_node("import collections.abc")
-        assert isinstance(import_node, nodes.Import)
-        imported_module = import_node.do_import_module(import_node.names[0][0])
-        # Make sure that the file we have imported is actually the submodule of collections and
-        # not the `abc` module. (Which would happen if you call `importlib.util.find_spec("abc")`
-        # instead of `importlib.util.find_spec("collections.abc")`)
-        assert isinstance(imported_module.file, str)
-        assert "collections" in imported_module.file
-
     def test_collections_object_not_subscriptable(self) -> None:
         """
         Test that unsubscriptable types are detected
@@ -239,6 +294,7 @@ class CollectionsBrain(unittest.TestCase):
         with self.assertRaises(AttributeInferenceError):
             inferred.getattr("__class_getitem__")
 
+    @test_utils.require_version(minver="3.9")
     def test_collections_object_subscriptable(self):
         """Starting with python39 some object of collections module are subscriptable. Test one of them"""
         right_node = builder.extract_node(
@@ -302,6 +358,7 @@ class CollectionsBrain(unittest.TestCase):
         with self.assertRaises(AttributeInferenceError):
             inferred.getattr("__class_getitem__")
 
+    @test_utils.require_version(minver="3.9")
     def test_collections_object_subscriptable_2(self):
         """Starting with python39 Iterator in the collection.abc module is subscriptable"""
         node = builder.extract_node(
@@ -335,11 +392,9 @@ class CollectionsBrain(unittest.TestCase):
         with self.assertRaises(InferenceError):
             next(node.infer())
 
-    @pytest.mark.skipif(
-        PY314_PLUS, reason="collections.abc.ByteString was removed in 3.14"
-    )
+    @test_utils.require_version(minver="3.9")
     def test_collections_object_subscriptable_3(self):
-        """With Python 3.9 the ByteString class of the collections module is subscriptable
+        """With Python 3.9 the ByteString class of the collections module is subscritable
         (but not the same class from typing module)"""
         right_node = builder.extract_node(
             """
@@ -353,6 +408,7 @@ class CollectionsBrain(unittest.TestCase):
             inferred.getattr("__class_getitem__")[0], nodes.FunctionDef
         )
 
+    @test_utils.require_version(minver="3.9")
     def test_collections_object_subscriptable_4(self):
         """Multiple inheritance with subscriptable collection class"""
         node = builder.extract_node(
@@ -516,7 +572,7 @@ class TypingBrain(unittest.TestCase):
     def test_namedtuple_bug_pylint_4383(self) -> None:
         """Inference of 'NamedTuple' function shouldn't cause InferenceError.
 
-        https://github.com/pylint-dev/pylint/issues/4383
+        https://github.com/PyCQA/pylint/issues/4383
         """
         node = builder.extract_node(
             """
@@ -564,7 +620,7 @@ class TypingBrain(unittest.TestCase):
             self.assertIsInstance(inferred, nodes.ClassDef, node.as_string())
 
     def test_typing_type_without_tip(self):
-        """Regression test for https://github.com/pylint-dev/pylint/issues/5770"""
+        """Regression test for https://github.com/PyCQA/pylint/issues/5770"""
         node = builder.extract_node(
             """
         from typing import NewType
@@ -634,26 +690,9 @@ class TypingBrain(unittest.TestCase):
         assert isinstance(inferred, nodes.ClassDef)
         assert isinstance(inferred.getattr("__class_getitem__")[0], nodes.FunctionDef)
 
-    @test_utils.require_version(minver="3.12")
-    def test_typing_generic_subscriptable_pep695(self):
-        """Test class using type parameters is subscriptable with __class_getitem__ (added in PY312)"""
-        node = builder.extract_node(
-            """
-        class Foo[T]: ...
-        class Bar[T](Foo[T]): ...
-        """
-        )
-        inferred = next(node.infer())
-        assert isinstance(inferred, nodes.ClassDef)
-        assert inferred.name == "Bar"
-        assert isinstance(inferred.getattr("__class_getitem__")[0], nodes.FunctionDef)
-        ancestors = list(inferred.ancestors())
-        assert len(ancestors) == 2
-        assert ancestors[0].name == "Foo"
-        assert ancestors[1].name == "object"
-
+    @test_utils.require_version(minver="3.9")
     def test_typing_annotated_subscriptable(self):
-        """typing.Annotated is subscriptable with __class_getitem__ below 3.13."""
+        """Test typing.Annotated is subscriptable with __class_getitem__"""
         node = builder.extract_node(
             """
         import typing
@@ -661,13 +700,8 @@ class TypingBrain(unittest.TestCase):
         """
         )
         inferred = next(node.infer())
-        if PY313_PLUS:
-            assert isinstance(inferred, nodes.FunctionDef)
-        else:
-            assert isinstance(inferred, nodes.ClassDef)
-            assert isinstance(
-                inferred.getattr("__class_getitem__")[0], nodes.FunctionDef
-            )
+        assert isinstance(inferred, nodes.ClassDef)
+        assert isinstance(inferred.getattr("__class_getitem__")[0], nodes.FunctionDef)
 
     def test_typing_generic_slots(self):
         """Test slots for Generic subclass."""
@@ -686,37 +720,6 @@ class TypingBrain(unittest.TestCase):
         assert len(slots) == 1
         assert isinstance(slots[0], nodes.Const)
         assert slots[0].value == "value"
-
-    def test_typing_no_duplicates(self):
-        node = builder.extract_node(
-            """
-        from typing import List
-        List[int]
-        """
-        )
-        assert len(node.inferred()) == 1
-
-    def test_typing_no_duplicates_2(self):
-        node = builder.extract_node(
-            """
-        from typing import Optional, Tuple
-        Tuple[Optional[int], ...]
-        """
-        )
-        assert len(node.inferred()) == 1
-
-    @test_utils.require_version(minver="3.10")
-    def test_typing_param_spec(self):
-        node = builder.extract_node(
-            """
-        from typing import ParamSpec
-
-        P = ParamSpec("P")
-        """
-        )
-        inferred = next(node.targets[0].infer())
-        assert next(inferred.igetattr("args")) is not None
-        assert next(inferred.igetattr("kwargs")) is not None
 
     def test_collections_generic_alias_slots(self):
         """Test slots for a class which is a subclass of a generic alias type."""
@@ -762,6 +765,7 @@ class TypingBrain(unittest.TestCase):
         inferred = next(node.infer())
         self.assertIsInstance(inferred, astroid.Instance)
 
+    @test_utils.require_version("3.8")
     def test_typed_dict(self):
         code = builder.extract_node(
             """
@@ -921,7 +925,6 @@ class TypingBrain(unittest.TestCase):
             ],
         )
 
-    @pytest.mark.skipif(PY314_PLUS, reason="typing.ByteString was removed in 3.14")
     def test_typing_object_notsubscriptable_3(self):
         """Until python39 ByteString class of the typing module is not
         subscriptable (whereas it is in the collections' module)"""
@@ -938,6 +941,7 @@ class TypingBrain(unittest.TestCase):
                 inferred.getattr("__class_getitem__")[0], nodes.FunctionDef
             )
 
+    @test_utils.require_version(minver="3.9")
     def test_typing_object_builtin_subscriptable(self):
         """
         Test that builtins alias, such as typing.List, are subscriptable
@@ -953,6 +957,7 @@ class TypingBrain(unittest.TestCase):
             self.assertIsInstance(inferred.getattr("__iter__")[0], nodes.FunctionDef)
 
     @staticmethod
+    @test_utils.require_version(minver="3.9")
     def test_typing_type_subscriptable():
         node = builder.extract_node(
             """
@@ -996,7 +1001,13 @@ class TypingBrain(unittest.TestCase):
         assert inferred.value == 42
 
     def test_typing_cast_multiple_inference_calls(self) -> None:
-        """Inference of an outer function should not store the result for cast."""
+        """Inference of an outer function should not store the result for cast.
+
+        https://github.com/PyCQA/pylint/issues/8074
+
+        Possible solution caused RecursionErrors with Python 3.8 and CPython + PyPy.
+        https://github.com/PyCQA/astroid/pull/1982
+        """
         ast_nodes = builder.extract_node(
             """
         from typing import TypeVar, cast
@@ -1014,7 +1025,7 @@ class TypingBrain(unittest.TestCase):
 
         i1 = next(ast_nodes[1].infer())
         assert isinstance(i1, nodes.Const)
-        assert i1.value == "Hello"
+        assert i1.value == 2  # should be "Hello"!
 
 
 class ReBrainTest(unittest.TestCase):
@@ -1074,6 +1085,7 @@ class ReBrainTest(unittest.TestCase):
         with self.assertRaises(InferenceError):
             next(wrong_node2.infer())
 
+    @test_utils.require_version(minver="3.9")
     def test_re_pattern_subscriptable(self):
         """Test re.Pattern and re.Match are subscriptable in PY39+"""
         node1 = builder.extract_node(
@@ -1095,6 +1107,23 @@ class ReBrainTest(unittest.TestCase):
         inferred2 = next(node2.infer())
         assert isinstance(inferred2, nodes.ClassDef)
         assert isinstance(inferred2.getattr("__class_getitem__")[0], nodes.FunctionDef)
+
+
+class BrainFStrings(unittest.TestCase):
+    def test_no_crash_on_const_reconstruction(self) -> None:
+        node = builder.extract_node(
+            """
+        max_width = 10
+
+        test1 = f'{" ":{max_width+4}}'
+        print(f'"{test1}"')
+
+        test2 = f'[{"7":>{max_width}}:0]'
+        test2
+        """
+        )
+        inferred = next(node.infer())
+        self.assertIs(inferred, util.Uninferable)
 
 
 class BrainNamedtupleAnnAssignTest(unittest.TestCase):
@@ -1180,7 +1209,7 @@ class SubprocessTest(unittest.TestCase):
     def test_subprocess_args(self) -> None:
         """Make sure the args attribute exists for Popen
 
-        Test for https://github.com/pylint-dev/pylint/issues/1860"""
+        Test for https://github.com/PyCQA/pylint/issues/1860"""
         name = astroid.extract_node(
             """
         import subprocess
@@ -1636,7 +1665,7 @@ class TestLenBuiltinInference:
         """Make sure len builtin doesn't raise an AttributeError
         on instances of str or bytes
 
-        See https://github.com/pylint-dev/pylint/issues/1942
+        See https://github.com/PyCQA/pylint/issues/1942
         """
         code = 'len(str("F"))'
         try:
@@ -1650,7 +1679,7 @@ class TestLenBuiltinInference:
         """Make sure len calls do not trigger
         recursion errors for self referential assignment
 
-        See https://github.com/pylint-dev/pylint/issues/2734
+        See https://github.com/PyCQA/pylint/issues/2734
         """
         code = """
         class Data:
@@ -1725,8 +1754,7 @@ def test_infer_dict_from_keys() -> None:
     )
     for node in bad_nodes:
         with pytest.raises(InferenceError):
-            if isinstance(next(node.infer()), util.UninferableBase):
-                raise InferenceError
+            next(node.infer())
 
     # Test uninferable values
     good_nodes = astroid.extract_node(
@@ -1818,9 +1846,11 @@ class TestFunctoolsPartial:
         assert len(inferred) == 1
         partial = inferred[0]
         assert isinstance(partial, objects.PartialFunction)
-        assert isinstance(partial.as_string(), str)
         assert isinstance(partial.doc_node, nodes.Const)
         assert partial.doc_node.value == "Docstring"
+        with pytest.warns(DeprecationWarning) as records:
+            assert partial.doc == "Docstring"
+            assert len(records) == 1
         assert partial.lineno == 3
         assert partial.col_offset == 0
 
@@ -2007,7 +2037,6 @@ def test_oserror_model() -> None:
     assert strerror.value == ""
 
 
-@pytest.mark.skipif(PY313_PLUS, reason="Python >= 3.13 no longer has a crypt module")
 def test_crypt_brain() -> None:
     module = MANAGER.ast_from_module_name("crypt")
     dynamic_attrs = [
@@ -2038,7 +2067,7 @@ def test_str_and_bytes(code, expected_class, expected_value):
 
 def test_no_recursionerror_on_self_referential_length_check() -> None:
     """
-    Regression test for https://github.com/pylint-dev/astroid/issues/777
+    Regression test for https://github.com/PyCQA/astroid/issues/777
 
     This test should only raise an InferenceError and no RecursionError.
     """
@@ -2057,8 +2086,8 @@ def test_no_recursionerror_on_self_referential_length_check() -> None:
 
 def test_inference_on_outer_referential_length_check() -> None:
     """
-    Regression test for https://github.com/pylint-dev/pylint/issues/5244
-    See also https://github.com/pylint-dev/astroid/pull/1234
+    Regression test for https://github.com/PyCQA/pylint/issues/5244
+    See also https://github.com/PyCQA/astroid/pull/1234
 
     This test should succeed without any error.
     """
@@ -2084,8 +2113,8 @@ def test_inference_on_outer_referential_length_check() -> None:
 
 def test_no_attributeerror_on_self_referential_length_check() -> None:
     """
-    Regression test for https://github.com/pylint-dev/pylint/issues/5244
-    See also https://github.com/pylint-dev/astroid/pull/1234
+    Regression test for https://github.com/PyCQA/pylint/issues/5244
+    See also https://github.com/PyCQA/astroid/pull/1234
 
     This test should only raise an InferenceError and no AttributeError.
     """

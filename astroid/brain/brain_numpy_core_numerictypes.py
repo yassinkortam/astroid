@@ -1,18 +1,17 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 # TODO(hippo91) : correct the methods signature.
 
 """Astroid hooks for numpy.core.numerictypes module."""
-from astroid import nodes
 from astroid.brain.brain_numpy_utils import numpy_supports_type_hints
 from astroid.brain.helpers import register_module_extender
 from astroid.builder import parse
 from astroid.manager import AstroidManager
 
 
-def numpy_core_numerictypes_transform() -> nodes.Module:
+def numpy_core_numerictypes_transform():
     # TODO: Uniformize the generic API with the ndarray one.
     #       According to numpy doc the generic object should expose
     #       the same API than ndarray. This has been done here partially
@@ -259,7 +258,6 @@ def numpy_core_numerictypes_transform() -> nodes.Module:
     )
 
 
-def register(manager: AstroidManager) -> None:
-    register_module_extender(
-        manager, "numpy.core.numerictypes", numpy_core_numerictypes_transform
-    )
+register_module_extender(
+    AstroidManager(), "numpy.core.numerictypes", numpy_core_numerictypes_transform
+)

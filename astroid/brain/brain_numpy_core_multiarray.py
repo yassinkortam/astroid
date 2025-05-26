@@ -1,18 +1,12 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 """Astroid hooks for numpy.core.multiarray module."""
 
 import functools
 
-from astroid import nodes
-from astroid.brain.brain_numpy_utils import (
-    attribute_name_looks_like_numpy_member,
-    infer_numpy_attribute,
-    infer_numpy_name,
-    member_name_looks_like_numpy_member,
-)
+from astroid.brain.brain_numpy_utils import infer_numpy_member, looks_like_numpy_member
 from astroid.brain.helpers import register_module_extender
 from astroid.builder import parse
 from astroid.inference_tip import inference_tip
@@ -20,7 +14,7 @@ from astroid.manager import AstroidManager
 from astroid.nodes.node_classes import Attribute, Name
 
 
-def numpy_core_multiarray_transform() -> nodes.Module:
+def numpy_core_multiarray_transform():
     return parse(
         """
     # different functions defined in multiarray.py
@@ -31,6 +25,11 @@ def numpy_core_multiarray_transform() -> nodes.Module:
         return numpy.ndarray([0, 0])
         """
     )
+
+
+register_module_extender(
+    AstroidManager(), "numpy.core.multiarray", numpy_core_multiarray_transform
+)
 
 
 METHODS_TO_BE_INFERRED = {
@@ -87,21 +86,15 @@ METHODS_TO_BE_INFERRED = {
             return numpy.ndarray([0, 0])""",
 }
 
-
-def register(manager: AstroidManager) -> None:
-    register_module_extender(
-        manager, "numpy.core.multiarray", numpy_core_multiarray_transform
-    )
-
-    method_names = frozenset(METHODS_TO_BE_INFERRED.keys())
-
-    manager.register_transform(
+for method_name, function_src in METHODS_TO_BE_INFERRED.items():
+    inference_function = functools.partial(infer_numpy_member, function_src)
+    AstroidManager().register_transform(
         Attribute,
-        inference_tip(functools.partial(infer_numpy_attribute, METHODS_TO_BE_INFERRED)),
-        functools.partial(attribute_name_looks_like_numpy_member, method_names),
+        inference_tip(inference_function),
+        functools.partial(looks_like_numpy_member, method_name),
     )
-    manager.register_transform(
+    AstroidManager().register_transform(
         Name,
-        inference_tip(functools.partial(infer_numpy_name, METHODS_TO_BE_INFERRED)),
-        functools.partial(member_name_looks_like_numpy_member, method_names),
+        inference_tip(inference_function),
+        functools.partial(looks_like_numpy_member, method_name),
     )

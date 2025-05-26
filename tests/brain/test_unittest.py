@@ -1,15 +1,17 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 import unittest
 
 from astroid import builder
+from astroid.test_utils import require_version
 
 
 class UnittestTest(unittest.TestCase):
     """A class that tests the brain_unittest module."""
 
+    @require_version(minver="3.8.0")
     def test_isolatedasynciotestcase(self):
         """
         Tests that the IsolatedAsyncioTestCase class is statically imported

@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import pytest
 
 import astroid
 from astroid import extract_node, nodes
-from astroid.const import PY310_PLUS, PY312_PLUS
+from astroid.const import PY38_PLUS, PY310_PLUS
 from astroid.exceptions import InferenceError
 from astroid.manager import AstroidManager
 from astroid.util import Uninferable, UninferableBase
@@ -171,7 +171,7 @@ class ProtocolTests(unittest.TestCase):
         )
 
     def test_assigned_stmts_starred_inside_call(self) -> None:
-        """Regression test for https://github.com/pylint-dev/pylint/issues/6372."""
+        """Regression test for https://github.com/PyCQA/pylint/issues/6372."""
         code = "string_twos = ''.join(str(*y) for _, *y in [[1, 2], [1, 2]]) #@"
         stmt = extract_node(code)
         starred = next(stmt.nodes_of_class(nodes.Starred))
@@ -279,36 +279,8 @@ class ProtocolTests(unittest.TestCase):
         parsed = extract_node("None ** 2")
         assert parsed.inferred() == [Uninferable]
 
-    @staticmethod
-    def test_uninferable_list_multiplication() -> None:
-        """Attempting to calculate the result is prohibitively expensive."""
-        parsed = extract_node("[0] * 123456789")
-        element = parsed.inferred()[0].elts[0]
-        assert element.value is Uninferable
 
-    @staticmethod
-    def test_uninferable_list_multiplication_with_multiple_operands() -> None:
-        """Attempting to calculate the result is prohibitively expensive."""
-        parsed = extract_node("[0] * 825 * 16547118")
-        element = parsed.inferred()[0].elts[0]
-        assert element.value is Uninferable
-
-    @staticmethod
-    def test_list_multiplication_with_empty_list_and_overflowing_multiplier() -> None:
-        parsed = extract_node("[] * 1163845194457646539560")
-        assert parsed.inferred()[0].elts == []
-
-    @staticmethod
-    def test_list_multiplication_with_zero_multiplier() -> None:
-        parsed = extract_node("[0] * 0")
-        assert parsed.inferred()[0].elts == []
-
-    @staticmethod
-    def test_list_multiplication_with_negative_overflowing_multiplier() -> None:
-        parsed = extract_node("[0] * -9223372036854775809")
-        assert parsed.inferred()[0].elts == []
-
-
+@pytest.mark.skipif(not PY38_PLUS, reason="needs assignment expressions")
 def test_named_expr_inference() -> None:
     code = """
     if (a := 2) == 2:
@@ -437,39 +409,3 @@ class TestPatternMatching:
         assert match_as.name
         assigned_match_as = next(match_as.name.assigned_stmts())
         assert assigned_match_as == subject
-
-
-@pytest.mark.skipif(not PY312_PLUS, reason="Generic typing syntax requires python 3.12")
-class TestGenericTypeSyntax:
-    @staticmethod
-    def test_assigned_stmts_type_var():
-        """The result is 'Uninferable' and no exception is raised."""
-        assign_stmts = extract_node("type Point[T] = tuple[float, float]")
-        type_var: nodes.TypeVar = assign_stmts.type_params[0]
-        assigned = next(type_var.name.assigned_stmts())
-        # Hack so inference doesn't fail when evaluating __class_getitem__
-        # Revert if it's causing issues.
-        assert isinstance(assigned, nodes.Const)
-        assert assigned.value is None
-
-    @staticmethod
-    def test_assigned_stmts_type_var_tuple():
-        """The result is 'Uninferable' and no exception is raised."""
-        assign_stmts = extract_node("type Alias[*Ts] = tuple[*Ts]")
-        type_var_tuple: nodes.TypeVarTuple = assign_stmts.type_params[0]
-        assigned = next(type_var_tuple.name.assigned_stmts())
-        # Hack so inference doesn't fail when evaluating __class_getitem__
-        # Revert if it's causing issues.
-        assert isinstance(assigned, nodes.Const)
-        assert assigned.value is None
-
-    @staticmethod
-    def test_assigned_stmts_param_spec():
-        """The result is 'Uninferable' and no exception is raised."""
-        assign_stmts = extract_node("type Alias[**P] = Callable[P, int]")
-        param_spec: nodes.ParamSpec = assign_stmts.type_params[0]
-        assigned = next(param_spec.name.assigned_stmts())
-        # Hack so inference doesn't fail when evaluating __class_getitem__
-        # Revert if it's causing issues.
-        assert isinstance(assigned, nodes.Const)
-        assert assigned.value is None

@@ -1,14 +1,13 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
-from astroid import nodes
 from astroid.brain.helpers import register_module_extender
 from astroid.builder import AstroidBuilder
 from astroid.manager import AstroidManager
 
 
-def mechanize_transform() -> nodes.Module:
+def mechanize_transform():
     return AstroidBuilder(AstroidManager()).string_build(
         """class Browser(object):
     def __getattr__(self, name):
@@ -121,5 +120,4 @@ def mechanize_transform() -> nodes.Module:
     )
 
 
-def register(manager: AstroidManager) -> None:
-    register_module_extender(manager, "mechanize", mechanize_transform)
+register_module_extender(AstroidManager(), "mechanize", mechanize_transform)

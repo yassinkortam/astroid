@@ -9,13 +9,7 @@
 
 # Add files or directories to the blacklist. They should be base names, not
 # paths.
-ignore=.tox,CVS
-
-# Add files or directories matching the regular expressions patterns to the
-# ignore-list. The regex matches against paths and can be in Posix or Windows
-# format. Because '\\' represents the directory delimiter on Windows systems,
-# it can't be used as an escape character.
-ignore-paths=doc/conf.py,tests/testdata/
+ignore=CVS
 
 # Pickle collected data for later comparisons.
 persistent=yes
@@ -45,7 +39,7 @@ unsafe-load-any-extension=no
 extension-pkg-whitelist=
 
 # Minimum supported python version
-py-version = 3.9.0
+py-version = 3.7.2
 
 
 [REPORTS]
@@ -92,6 +86,9 @@ disable=fixme,
         missing-docstring,
         too-few-public-methods,
         too-many-public-methods,
+        too-many-boolean-expressions,
+        too-many-branches,
+        too-many-statements,
         # We know about it and we're doing our best to remove it in 2.0 (oups)
         cyclic-import,
         # Requires major redesign for fixing this (and private
@@ -110,7 +107,6 @@ disable=fixme,
         # This one would help performance but we need to fix the pipeline first
         # and there are a lot of warning for it
         consider-using-f-string,
-        consider-using-assignment-expr,
 
 enable=useless-suppression
 
@@ -262,7 +258,8 @@ mixin-class-rgx=.*Mix[Ii]n
 # List of members which are set dynamically and missed by pylint inference
 # system, and so shouldn't trigger E0201 when accessed. Python regular
 # expressions are accepted.
-generated-members=REQUEST,acl_users,aq_parent,argparse.Namespace
+# TODO: Remove ast.Match pattern once https://github.com/PyCQA/pylint/issues/6594 is fixed
+generated-members=REQUEST,acl_users,aq_parent,argparse.Namespace,ast\.([mM]atch.*|pattern)
 
 
 [VARIABLES]
@@ -303,9 +300,6 @@ exclude-protected=_asdict,_fields,_replace,_source,_make
 
 # Maximum number of arguments for function / method
 max-args=10
-
-# Maximum number of positional arguments for function / method.
-max-positional-arguments=8
 
 # Argument names that match this expression will be ignored. Default to name
 
@@ -354,9 +348,6 @@ ext-import-graph=
 # not be disabled)
 int-import-graph=
 
-# Force import order to recognize a module as part of the standard
-# compatibility libraries.
-known-standard-library=_io
 
 [EXCEPTIONS]
 

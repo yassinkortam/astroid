@@ -1,15 +1,15 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 """Astroid hooks for unittest module."""
-from astroid import nodes
 from astroid.brain.helpers import register_module_extender
 from astroid.builder import parse
+from astroid.const import PY38_PLUS
 from astroid.manager import AstroidManager
 
 
-def IsolatedAsyncioTestCaseImport() -> nodes.Module:
+def IsolatedAsyncioTestCaseImport():
     """
     In the unittest package, the IsolatedAsyncioTestCase class is imported lazily.
 
@@ -18,7 +18,7 @@ def IsolatedAsyncioTestCaseImport() -> nodes.Module:
     is not imported statically (during import time).
     This function mocks a classical static import of the IsolatedAsyncioTestCase.
 
-    (see https://github.com/pylint-dev/pylint/issues/4060)
+    (see https://github.com/PyCQA/pylint/issues/4060)
     """
     return parse(
         """
@@ -27,5 +27,7 @@ def IsolatedAsyncioTestCaseImport() -> nodes.Module:
     )
 
 
-def register(manager: AstroidManager) -> None:
-    register_module_extender(manager, "unittest", IsolatedAsyncioTestCaseImport)
+if PY38_PLUS:
+    register_module_extender(
+        AstroidManager(), "unittest", IsolatedAsyncioTestCaseImport
+    )

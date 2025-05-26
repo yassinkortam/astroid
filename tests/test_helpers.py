@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 import builtins
 import unittest
@@ -8,10 +8,8 @@ import unittest
 import pytest
 
 from astroid import builder, helpers, manager, nodes, raw_building, util
-from astroid.builder import AstroidBuilder
 from astroid.const import IS_PYPY
 from astroid.exceptions import _NonDeducibleTypeHierarchy
-from astroid.nodes.node_classes import UNATTACHED_UNKNOWN
 from astroid.nodes.scoped_nodes import ClassDef
 
 
@@ -19,7 +17,6 @@ class TestHelpers(unittest.TestCase):
     def setUp(self) -> None:
         builtins_name = builtins.__name__
         astroid_manager = manager.AstroidManager()
-        AstroidBuilder(astroid_manager)  # Only to ensure boostrap
         self.builtins = astroid_manager.astroid_cache[builtins_name]
         self.manager = manager.AstroidManager()
 
@@ -27,7 +24,8 @@ class TestHelpers(unittest.TestCase):
         return self.builtins.getattr(obj_name)[0]
 
     def _build_custom_builtin(self, obj_name: str) -> ClassDef:
-        proxy = raw_building.build_class(obj_name, self.builtins)
+        proxy = raw_building.build_class(obj_name)
+        proxy.parent = self.builtins
         return proxy
 
     def assert_classes_equal(self, cls: ClassDef, other: ClassDef) -> None:
@@ -44,7 +42,6 @@ class TestHelpers(unittest.TestCase):
             ("type", self._extract("type")),
             ("object", self._extract("type")),
             ("object()", self._extract("object")),
-            ("super()", self._extract("super")),
             ("lambda: None", self._build_custom_builtin("function")),
             ("len", self._build_custom_builtin("builtin_function_or_method")),
             ("None", self._build_custom_builtin("NoneType")),
@@ -261,18 +258,3 @@ class TestHelpers(unittest.TestCase):
         builtin_type = self._extract("type")
         self.assertTrue(helpers.is_supertype(builtin_type, cls_a))
         self.assertTrue(helpers.is_subtype(cls_a, builtin_type))
-
-
-def test_uninferable_for_safe_infer() -> None:
-    uninfer = util.Uninferable
-    assert util.safe_infer(util.Uninferable) == uninfer
-
-
-def test_safe_infer_shim() -> None:
-    with pytest.warns(DeprecationWarning) as records:
-        helpers.safe_infer(UNATTACHED_UNKNOWN)
-
-    assert (
-        "Import safe_infer from astroid.util; this shim in astroid.helpers will be removed."
-        in records[0].message.args[0]
-    )

@@ -1,9 +1,9 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 try:
-    import regex  # type: ignore[import]
+    import regex
 
     HAS_REGEX = True
 except ImportError:
@@ -11,7 +11,7 @@ except ImportError:
 
 import pytest
 
-from astroid import MANAGER, builder, nodes
+from astroid import MANAGER, builder, nodes, test_utils
 
 
 @pytest.mark.skipif(not HAS_REGEX, reason="This test requires the regex library.")
@@ -24,9 +24,7 @@ class TestRegexBrain:
             assert name in re_ast
             assert next(re_ast[name].infer()).value == getattr(regex, name)
 
-    @pytest.mark.xfail(
-        reason="Started failing on main, but no one reproduced locally yet"
-    )
+    @test_utils.require_version(minver="3.9")
     def test_regex_pattern_and_match_subscriptable(self):
         """Test regex.Pattern and regex.Match are subscriptable in PY39+."""
         node1 = builder.extract_node(

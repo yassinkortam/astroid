@@ -1,12 +1,12 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 """Tests for the astroid variable lookup capabilities."""
 import functools
 import unittest
 
-from astroid import builder, nodes
+from astroid import builder, nodes, test_utils
 from astroid.exceptions import (
     AttributeInferenceError,
     InferenceError,
@@ -322,6 +322,24 @@ class LookupTest(resources.SysPathSetup, unittest.TestCase):
             self.assertEqual(len(name.lookup("x")[1]), 1, repr(name))
             self.assertEqual(name.lookup("x")[1][0].lineno, 3, repr(name))
 
+    def test_generator_attributes(self) -> None:
+        tree = builder.parse(
+            """
+            def count():
+                "test"
+                yield 0
+
+            iterer = count()
+            num = iterer.next()
+        """
+        )
+        next_node = tree.body[2].value.func
+        gener = next_node.expr.inferred()[0]
+        self.assertIsInstance(gener.getattr("__next__")[0], nodes.FunctionDef)
+        self.assertIsInstance(gener.getattr("send")[0], nodes.FunctionDef)
+        self.assertIsInstance(gener.getattr("throw")[0], nodes.FunctionDef)
+        self.assertIsInstance(gener.getattr("close")[0], nodes.FunctionDef)
+
     def test_explicit___name__(self) -> None:
         code = """
             class Pouet:
@@ -352,9 +370,9 @@ class LookupTest(resources.SysPathSetup, unittest.TestCase):
         ''',
             "data.__init__",
         )
-        path = next(
-            n for n in astroid.nodes_of_class(nodes.Name) if n.name == "__path__"
-        )
+        path = [n for n in astroid.nodes_of_class(nodes.Name) if n.name == "__path__"][
+            0
+        ]
         self.assertEqual(len(path.lookup("__path__")[1]), 1)
 
     def test_builtin_lookup(self) -> None:
@@ -459,7 +477,7 @@ class LookupControlFlowTest(unittest.TestCase):
             print(x)
         """
         astroid = builder.parse(code)
-        x_name = next(n for n in astroid.nodes_of_class(nodes.Name) if n.name == "x")
+        x_name = [n for n in astroid.nodes_of_class(nodes.Name) if n.name == "x"][0]
         _, stmts = x_name.lookup("x")
         self.assertEqual(len(stmts), 1)
         self.assertEqual(stmts[0].lineno, 3)
@@ -471,7 +489,7 @@ class LookupControlFlowTest(unittest.TestCase):
             x = 10
         """
         astroid = builder.parse(code)
-        x_name = next(n for n in astroid.nodes_of_class(nodes.Name) if n.name == "x")
+        x_name = [n for n in astroid.nodes_of_class(nodes.Name) if n.name == "x"][0]
         _, stmts = x_name.lookup("x")
         self.assertEqual(len(stmts), 0)
 
@@ -483,7 +501,7 @@ class LookupControlFlowTest(unittest.TestCase):
             print(x)
         """
         astroid = builder.parse(code)
-        x_name = next(n for n in astroid.nodes_of_class(nodes.Name) if n.name == "x")
+        x_name = [n for n in astroid.nodes_of_class(nodes.Name) if n.name == "x"][0]
         _, stmts = x_name.lookup("x")
         self.assertEqual(len(stmts), 0)
 
@@ -496,7 +514,7 @@ class LookupControlFlowTest(unittest.TestCase):
             print(x)
         """
         astroid = builder.parse(code)
-        x_name = next(n for n in astroid.nodes_of_class(nodes.Name) if n.name == "x")
+        x_name = [n for n in astroid.nodes_of_class(nodes.Name) if n.name == "x"][0]
         _, stmts = x_name.lookup("x")
         self.assertEqual(len(stmts), 1)
         self.assertEqual(stmts[0].lineno, 4)
@@ -513,7 +531,7 @@ class LookupControlFlowTest(unittest.TestCase):
                 print(x)
         """
         astroid = builder.parse(code)
-        x_name = next(n for n in astroid.nodes_of_class(nodes.Name) if n.name == "x")
+        x_name = [n for n in astroid.nodes_of_class(nodes.Name) if n.name == "x"][0]
         _, stmts = x_name.lookup("x")
         self.assertEqual(len(stmts), 2)
         self.assertCountEqual([stmt.lineno for stmt in stmts], [3, 5])
@@ -531,7 +549,7 @@ class LookupControlFlowTest(unittest.TestCase):
                 print(x)
         """
         astroid = builder.parse(code)
-        x_name = next(n for n in astroid.nodes_of_class(nodes.Name) if n.name == "x")
+        x_name = [n for n in astroid.nodes_of_class(nodes.Name) if n.name == "x"][0]
         _, stmts = x_name.lookup("x")
         self.assertEqual(len(stmts), 2)
         self.assertCountEqual([stmt.lineno for stmt in stmts], [3, 6])
@@ -553,7 +571,7 @@ class LookupControlFlowTest(unittest.TestCase):
                 print(x)
         """
         astroid = builder.parse(code)
-        x_name = next(n for n in astroid.nodes_of_class(nodes.Name) if n.name == "x")
+        x_name = [n for n in astroid.nodes_of_class(nodes.Name) if n.name == "x"][0]
         _, stmts = x_name.lookup("x")
         self.assertEqual(len(stmts), 4)
         self.assertCountEqual([stmt.lineno for stmt in stmts], [3, 6, 8, 10])
@@ -576,7 +594,7 @@ class LookupControlFlowTest(unittest.TestCase):
                     print(x)
         """
         astroid = builder.parse(code)
-        x_name = next(n for n in astroid.nodes_of_class(nodes.Name) if n.name == "x")
+        x_name = [n for n in astroid.nodes_of_class(nodes.Name) if n.name == "x"][0]
         _, stmts = x_name.lookup("x")
         self.assertEqual(len(stmts), 1)
         self.assertEqual(stmts[0].lineno, 3)
@@ -600,7 +618,7 @@ class LookupControlFlowTest(unittest.TestCase):
                     x = 5
         """
         astroid = builder.parse(code)
-        x_name = next(n for n in astroid.nodes_of_class(nodes.Name) if n.name == "x")
+        x_name = [n for n in astroid.nodes_of_class(nodes.Name) if n.name == "x"][0]
         _, stmts = x_name.lookup("x")
         self.assertEqual(len(stmts), 1)
         self.assertEqual(stmts[0].lineno, 10)
@@ -622,7 +640,7 @@ class LookupControlFlowTest(unittest.TestCase):
                 print(x)
         """
         astroid = builder.parse(code)
-        x_name = next(n for n in astroid.nodes_of_class(nodes.Name) if n.name == "x")
+        x_name = [n for n in astroid.nodes_of_class(nodes.Name) if n.name == "x"][0]
         _, stmts = x_name.lookup("x")
         self.assertEqual(len(stmts), 3)
         self.assertCountEqual([stmt.lineno for stmt in stmts], [3, 5, 7])
@@ -653,7 +671,7 @@ class LookupControlFlowTest(unittest.TestCase):
         """Test lookup works correctly when a variable appears in an if condition,
         and the variable is reassigned in each branch.
 
-        This is based on pylint-dev/pylint issue #3711.
+        This is based on PyCQA/pylint issue #3711.
         """
         code = """
             x = 10
@@ -692,7 +710,7 @@ class LookupControlFlowTest(unittest.TestCase):
                 print(x)
         """
         astroid = builder.parse(code)
-        x_name = next(n for n in astroid.nodes_of_class(nodes.Name) if n.name == "x")
+        x_name = [n for n in astroid.nodes_of_class(nodes.Name) if n.name == "x"][0]
         _, stmts = x_name.lookup("x")
         self.assertEqual(len(stmts), 1)
         self.assertEqual(stmts[0].lineno, 9)
@@ -712,7 +730,7 @@ class LookupControlFlowTest(unittest.TestCase):
                     print(x)
         """
         astroid = builder.parse(code)
-        x_name = next(n for n in astroid.nodes_of_class(nodes.Name) if n.name == "x")
+        x_name = [n for n in astroid.nodes_of_class(nodes.Name) if n.name == "x"][0]
         _, stmts = x_name.lookup("x")
         self.assertEqual(len(stmts), 1)
         self.assertEqual(stmts[0].lineno, 3)
@@ -771,6 +789,7 @@ class LookupControlFlowTest(unittest.TestCase):
         self.assertEqual(len(stmts2), 1)
         self.assertEqual(stmts2[0].lineno, 7)
 
+    @test_utils.require_version(minver="3.8")
     def test_assign_after_posonly_param(self):
         """When an assignment statement overwrites a function positional-only parameter,
         only the assignment is returned, even when the variable and assignment do
@@ -810,14 +829,14 @@ class LookupControlFlowTest(unittest.TestCase):
                     print(args, kwargs)
         """
         astroid = builder.parse(code)
-        x_name = next(n for n in astroid.nodes_of_class(nodes.Name) if n.name == "args")
+        x_name = [n for n in astroid.nodes_of_class(nodes.Name) if n.name == "args"][0]
         _, stmts1 = x_name.lookup("args")
         self.assertEqual(len(stmts1), 1)
         self.assertEqual(stmts1[0].lineno, 3)
 
-        x_name = next(
-            n for n in astroid.nodes_of_class(nodes.Name) if n.name == "kwargs"
-        )
+        x_name = [n for n in astroid.nodes_of_class(nodes.Name) if n.name == "kwargs"][
+            0
+        ]
         _, stmts2 = x_name.lookup("kwargs")
         self.assertEqual(len(stmts2), 1)
         self.assertEqual(stmts2[0].lineno, 4)
@@ -833,7 +852,7 @@ class LookupControlFlowTest(unittest.TestCase):
                 print(e)
         """
         astroid = builder.parse(code)
-        x_name = next(n for n in astroid.nodes_of_class(nodes.Name) if n.name == "e")
+        x_name = [n for n in astroid.nodes_of_class(nodes.Name) if n.name == "e"][0]
         _, stmts = x_name.lookup("e")
         self.assertEqual(len(stmts), 1)
         self.assertEqual(stmts[0].lineno, 4)
@@ -851,7 +870,7 @@ class LookupControlFlowTest(unittest.TestCase):
                 print(e)
         """
         astroid = builder.parse(code)
-        x_name = next(n for n in astroid.nodes_of_class(nodes.Name) if n.name == "e")
+        x_name = [n for n in astroid.nodes_of_class(nodes.Name) if n.name == "e"][0]
         _, stmts = x_name.lookup("e")
         self.assertEqual(len(stmts), 1)
         self.assertEqual(stmts[0].lineno, 5)
@@ -893,7 +912,7 @@ class LookupControlFlowTest(unittest.TestCase):
             print(e)
         """
         astroid = builder.parse(code)
-        x_name = next(n for n in astroid.nodes_of_class(nodes.Name) if n.name == "e")
+        x_name = [n for n in astroid.nodes_of_class(nodes.Name) if n.name == "e"][0]
         _, stmts = x_name.lookup("e")
         self.assertEqual(len(stmts), 0)
 
@@ -911,7 +930,7 @@ class LookupControlFlowTest(unittest.TestCase):
             print(e)
         """
         astroid = builder.parse(code)
-        x_name = next(n for n in astroid.nodes_of_class(nodes.Name) if n.name == "e")
+        x_name = [n for n in astroid.nodes_of_class(nodes.Name) if n.name == "e"][0]
         _, stmts = x_name.lookup("e")
         self.assertEqual(len(stmts), 0)
 
@@ -927,7 +946,7 @@ class LookupControlFlowTest(unittest.TestCase):
                 print(x)
         """
         astroid = builder.parse(code)
-        x_name = next(n for n in astroid.nodes_of_class(nodes.Name) if n.name == "x")
+        x_name = [n for n in astroid.nodes_of_class(nodes.Name) if n.name == "x"][0]
         _, stmts = x_name.lookup("x")
         self.assertEqual(len(stmts), 1)
         self.assertEqual(stmts[0].lineno, 5)
@@ -946,7 +965,7 @@ class LookupControlFlowTest(unittest.TestCase):
                 print(x)
         """
         astroid = builder.parse(code)
-        x_name = next(n for n in astroid.nodes_of_class(nodes.Name) if n.name == "x")
+        x_name = [n for n in astroid.nodes_of_class(nodes.Name) if n.name == "x"][0]
         _, stmts = x_name.lookup("x")
         self.assertEqual(len(stmts), 1)
         self.assertEqual(stmts[0].lineno, 7)
@@ -965,7 +984,7 @@ class LookupControlFlowTest(unittest.TestCase):
             print(x)
         """
         astroid = builder.parse(code)
-        x_name = next(n for n in astroid.nodes_of_class(nodes.Name) if n.name == "x")
+        x_name = [n for n in astroid.nodes_of_class(nodes.Name) if n.name == "x"][0]
         _, stmts = x_name.lookup("x")
         self.assertEqual(len(stmts), 2)
         self.assertCountEqual([stmt.lineno for stmt in stmts], [5, 7])
@@ -985,7 +1004,7 @@ class LookupControlFlowTest(unittest.TestCase):
             print(x)
         """
         astroid = builder.parse(code)
-        x_name = next(n for n in astroid.nodes_of_class(nodes.Name) if n.name == "x")
+        x_name = [n for n in astroid.nodes_of_class(nodes.Name) if n.name == "x"][0]
         _, stmts = x_name.lookup("x")
         self.assertEqual(len(stmts), 1)
         self.assertEqual(stmts[0].lineno, 8)

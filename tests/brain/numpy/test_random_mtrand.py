@@ -1,11 +1,8 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
-
-from __future__ import annotations
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 import unittest
-from typing import ClassVar
 
 try:
     import numpy  # pylint: disable=unused-import
@@ -22,7 +19,7 @@ class NumpyBrainRandomMtrandTest(unittest.TestCase):
     """Test of all the functions of numpy.random.mtrand module."""
 
     # Map between functions names and arguments names and default values
-    all_mtrand: ClassVar[dict[str, tuple]] = {
+    all_mtrand = {
         "beta": (["a", "b", "size"], [None]),
         "binomial": (["n", "p", "size"], [None]),
         "bytes": (["length"], []),

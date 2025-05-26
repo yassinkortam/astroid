@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 """
 Astroid hooks for ctypes module.
@@ -12,13 +12,12 @@ among float, int, bytes or str.
 """
 import sys
 
-from astroid import nodes
 from astroid.brain.helpers import register_module_extender
 from astroid.builder import parse
 from astroid.manager import AstroidManager
 
 
-def enrich_ctypes_redefined_types() -> nodes.Module:
+def enrich_ctypes_redefined_types():
     """
     For each ctypes redefined types, overload 'value' and '_type_' members
     definition.
@@ -80,7 +79,6 @@ class {c_type}(_SimpleCData):
     return parse("\n".join(src))
 
 
-def register(manager: AstroidManager) -> None:
-    if not hasattr(sys, "pypy_version_info"):
-        # No need of this module in pypy where everything is written in python
-        register_module_extender(manager, "ctypes", enrich_ctypes_redefined_types)
+if not hasattr(sys, "pypy_version_info"):
+    # No need of this module in pypy where everything is written in python
+    register_module_extender(AstroidManager(), "ctypes", enrich_ctypes_redefined_types)

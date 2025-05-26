@@ -1,17 +1,16 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 """Astroid brain hints for some of the `http` module."""
 import textwrap
 
-from astroid import nodes
 from astroid.brain.helpers import register_module_extender
 from astroid.builder import AstroidBuilder
 from astroid.manager import AstroidManager
 
 
-def _http_transform() -> nodes.Module:
+def _http_transform():
     code = textwrap.dedent(
         """
     from enum import IntEnum
@@ -141,7 +140,7 @@ def _http_transform() -> nodes.Module:
     return AstroidBuilder(AstroidManager()).string_build(code)
 
 
-def _http_client_transform() -> nodes.Module:
+def _http_client_transform():
     return AstroidBuilder(AstroidManager()).string_build(
         textwrap.dedent(
             """
@@ -209,6 +208,5 @@ def _http_client_transform() -> nodes.Module:
     )
 
 
-def register(manager: AstroidManager) -> None:
-    register_module_extender(manager, "http", _http_transform)
-    register_module_extender(manager, "http.client", _http_client_transform)
+register_module_extender(AstroidManager(), "http", _http_transform)
+register_module_extender(AstroidManager(), "http.client", _http_client_transform)

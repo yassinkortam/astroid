@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 """Different utilities for the numpy brains."""
 
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from astroid.builder import extract_node
 from astroid.context import InferenceContext
-from astroid.nodes.node_classes import Attribute, Import, Name
+from astroid.nodes.node_classes import Attribute, Import, Name, NodeNG
 
 # Class subscript is available in numpy starting with version 1.20.0
 NUMPY_VERSION_TYPE_HINTS_SUPPORT = ("1", "20", "0")
@@ -34,18 +34,9 @@ def _get_numpy_version() -> tuple[str, str, str]:
         return ("0", "0", "0")
 
 
-def infer_numpy_name(
-    sources: dict[str, str], node: Name, context: InferenceContext | None = None
-):
-    extracted_node = extract_node(sources[node.name])
-    return extracted_node.infer(context=context)
-
-
-def infer_numpy_attribute(
-    sources: dict[str, str], node: Attribute, context: InferenceContext | None = None
-):
-    extracted_node = extract_node(sources[node.attrname])
-    return extracted_node.infer(context=context)
+def infer_numpy_member(src, node, context: InferenceContext | None = None):
+    node = extract_node(src)
+    return node.infer(context=context)
 
 
 def _is_a_numpy_module(node: Name) -> bool:
@@ -70,23 +61,26 @@ def _is_a_numpy_module(node: Name) -> bool:
     )
 
 
-def member_name_looks_like_numpy_member(
-    member_names: frozenset[str], node: Name
-) -> bool:
+def looks_like_numpy_member(member_name: str, node: NodeNG) -> bool:
     """
-    Returns True if the Name node's name matches a member name from numpy
-    """
-    return node.name in member_names and node.root().name.startswith("numpy")
+    Returns True if the node is a member of numpy whose
+    name is member_name.
 
-
-def attribute_name_looks_like_numpy_member(
-    member_names: frozenset[str], node: Attribute
-) -> bool:
+    :param member_name: name of the member
+    :param node: node to test
+    :return: True if the node is a member of numpy
     """
-    Returns True if the Attribute node's name matches a member name from numpy
-    """
-    return (
-        node.attrname in member_names
+    if (
+        isinstance(node, Attribute)
+        and node.attrname == member_name
         and isinstance(node.expr, Name)
         and _is_a_numpy_module(node.expr)
-    )
+    ):
+        return True
+    if (
+        isinstance(node, Name)
+        and node.name == member_name
+        and node.root().name.startswith("numpy")
+    ):
+        return True
+    return False

@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 """Every available node class.
 
@@ -11,7 +11,11 @@ All nodes inherit from :class:`~astroid.nodes.node_classes.NodeNG`.
 """
 
 # Nodes not present in the builtin ast module:  DictUnpack, Unknown, and EvaluatedObject.
-from astroid.nodes.node_classes import (
+
+# This is the only node we re-export from the private _base_nodes module. This
+# is because it was originally part of the public API and hasn't been deprecated.
+from astroid.nodes._base_nodes import Statement
+from astroid.nodes.node_classes import (  # pylint: disable=redefined-builtin (Ellipsis)
     CONST_CLS,
     AnnAssign,
     Arguments,
@@ -39,10 +43,12 @@ from astroid.nodes.node_classes import (
     DelName,
     Dict,
     DictUnpack,
+    Ellipsis,
     EmptyNode,
     EvaluatedObject,
     ExceptHandler,
     Expr,
+    ExtSlice,
     For,
     FormattedValue,
     Global,
@@ -50,6 +56,7 @@ from astroid.nodes.node_classes import (
     IfExp,
     Import,
     ImportFrom,
+    Index,
     JoinedStr,
     Keyword,
     List,
@@ -67,7 +74,6 @@ from astroid.nodes.node_classes import (
     NamedExpr,
     NodeNG,
     Nonlocal,
-    ParamSpec,
     Pass,
     Pattern,
     Raise,
@@ -76,12 +82,9 @@ from astroid.nodes.node_classes import (
     Slice,
     Starred,
     Subscript,
-    Try,
-    TryStar,
+    TryExcept,
+    TryFinally,
     Tuple,
-    TypeAlias,
-    TypeVar,
-    TypeVarTuple,
     UnaryOp,
     Unknown,
     While,
@@ -93,7 +96,6 @@ from astroid.nodes.node_classes import (
     unpack_infer,
 )
 from astroid.nodes.scoped_nodes import (
-    SYNTHETIC_ROOT,
     AsyncFunctionDef,
     ClassDef,
     ComprehensionScope,
@@ -111,7 +113,10 @@ from astroid.nodes.scoped_nodes import (
 )
 from astroid.nodes.utils import Position
 
+_BaseContainer = BaseContainer  # TODO Remove for astroid 3.0
+
 ALL_NODE_CLASSES = (
+    _BaseContainer,
     BaseContainer,
     AnnAssign,
     Arguments,
@@ -143,10 +148,12 @@ ALL_NODE_CLASSES = (
     Dict,
     DictComp,
     DictUnpack,
+    Ellipsis,
     EmptyNode,
     EvaluatedObject,
     ExceptHandler,
     Expr,
+    ExtSlice,
     For,
     FormattedValue,
     FunctionDef,
@@ -156,6 +163,7 @@ ALL_NODE_CLASSES = (
     IfExp,
     Import,
     ImportFrom,
+    Index,
     JoinedStr,
     Keyword,
     Lambda,
@@ -177,7 +185,6 @@ ALL_NODE_CLASSES = (
     NamedExpr,
     NodeNG,
     Nonlocal,
-    ParamSpec,
     Pass,
     Pattern,
     Raise,
@@ -187,12 +194,9 @@ ALL_NODE_CLASSES = (
     Slice,
     Starred,
     Subscript,
-    Try,
-    TryStar,
+    TryExcept,
+    TryFinally,
     Tuple,
-    TypeAlias,
-    TypeVar,
-    TypeVarTuple,
     UnaryOp,
     Unknown,
     While,
@@ -202,9 +206,8 @@ ALL_NODE_CLASSES = (
 )
 
 __all__ = (
-    "CONST_CLS",
-    "SYNTHETIC_ROOT",
     "AnnAssign",
+    "are_exclusive",
     "Arguments",
     "Assert",
     "Assign",
@@ -216,37 +219,44 @@ __all__ = (
     "Attribute",
     "AugAssign",
     "Await",
-    "BaseContainer",
     "BinOp",
     "BoolOp",
     "Break",
+    "builtin_lookup",
     "Call",
     "ClassDef",
+    "CONST_CLS",
     "Compare",
     "Comprehension",
     "ComprehensionScope",
     "Const",
+    "const_factory",
     "Continue",
     "Decorators",
     "DelAttr",
-    "DelName",
     "Delete",
+    "DelName",
     "Dict",
     "DictComp",
     "DictUnpack",
+    "Ellipsis",
     "EmptyNode",
     "EvaluatedObject",
     "ExceptHandler",
     "Expr",
+    "ExtSlice",
     "For",
     "FormattedValue",
     "FunctionDef",
+    "function_to_method",
     "GeneratorExp",
+    "get_wrapping_class",
     "Global",
     "If",
     "IfExp",
     "Import",
     "ImportFrom",
+    "Index",
     "JoinedStr",
     "Keyword",
     "Lambda",
@@ -268,7 +278,6 @@ __all__ = (
     "NamedExpr",
     "NodeNG",
     "Nonlocal",
-    "ParamSpec",
     "Pass",
     "Position",
     "Raise",
@@ -277,23 +286,16 @@ __all__ = (
     "SetComp",
     "Slice",
     "Starred",
+    "Statement",
     "Subscript",
-    "Try",
-    "TryStar",
+    "TryExcept",
+    "TryFinally",
     "Tuple",
-    "TypeAlias",
-    "TypeVar",
-    "TypeVarTuple",
     "UnaryOp",
     "Unknown",
+    "unpack_infer",
     "While",
     "With",
     "Yield",
     "YieldFrom",
-    "are_exclusive",
-    "builtin_lookup",
-    "const_factory",
-    "function_to_method",
-    "get_wrapping_class",
-    "unpack_infer",
 )

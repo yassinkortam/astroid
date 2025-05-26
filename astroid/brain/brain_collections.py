@@ -1,21 +1,16 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from astroid.brain.helpers import register_module_extender
-from astroid.builder import AstroidBuilder, extract_node, parse
-from astroid.const import PY313_PLUS
+from astroid.builder import extract_node, parse
+from astroid.const import PY39_PLUS
 from astroid.context import InferenceContext
 from astroid.exceptions import AttributeInferenceError
 from astroid.manager import AstroidManager
 from astroid.nodes.scoped_nodes import ClassDef
-
-if TYPE_CHECKING:
-    from astroid import nodes
 
 
 def _collections_transform():
@@ -29,13 +24,6 @@ def _collections_transform():
     """
         + _deque_mock()
         + _ordered_dict_mock()
-    )
-
-
-def _collections_abc_313_transform() -> nodes.Module:
-    """See https://github.com/python/cpython/pull/124735"""
-    return AstroidBuilder(AstroidManager()).string_build(
-        "from _collections_abc import *"
     )
 
 
@@ -73,7 +61,9 @@ def _deque_mock():
         def __iadd__(self, other): pass
         def __mul__(self, other): pass
         def __imul__(self, other): pass
-        def __rmul__(self, other): pass
+        def __rmul__(self, other): pass"""
+    if PY39_PLUS:
+        base_deque_class += """
         @classmethod
         def __class_getitem__(self, item): return cls"""
     return base_deque_class
@@ -83,10 +73,15 @@ def _ordered_dict_mock():
     base_ordered_dict_class = """
     class OrderedDict(dict):
         def __reversed__(self): return self[::-1]
-        def move_to_end(self, key, last=False): pass
+        def move_to_end(self, key, last=False): pass"""
+    if PY39_PLUS:
+        base_ordered_dict_class += """
         @classmethod
         def __class_getitem__(cls, item): return cls"""
     return base_ordered_dict_class
+
+
+register_module_extender(AstroidManager(), "collections", _collections_transform)
 
 
 def _looks_like_subscriptable(node: ClassDef) -> bool:
@@ -121,18 +116,11 @@ def easy_class_getitem_inference(node, context: InferenceContext | None = None):
     node.locals["__class_getitem__"] = [func_to_add]
 
 
-def register(manager: AstroidManager) -> None:
-    register_module_extender(manager, "collections", _collections_transform)
-
+if PY39_PLUS:
     # Starting with Python39 some objects of the collection module are subscriptable
     # thanks to the __class_getitem__ method but the way it is implemented in
     # _collection_abc makes it difficult to infer. (We would have to handle AssignName inference in the
     # getitem method of the ClassDef class) Instead we put here a mock of the __class_getitem__ method
-    manager.register_transform(
+    AstroidManager().register_transform(
         ClassDef, easy_class_getitem_inference, _looks_like_subscriptable
     )
-
-    if PY313_PLUS:
-        register_module_extender(
-            manager, "collections.abc", _collections_abc_313_transform
-        )

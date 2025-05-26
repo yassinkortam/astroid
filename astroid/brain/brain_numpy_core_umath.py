@@ -1,19 +1,18 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 # Note: starting with version 1.18 numpy module has `__getattr__` method which prevent
 # `pylint` to emit `no-member` message for all numpy's attributes. (see pylint's module
 # typecheck in `_emit_no_member` function)
 
 """Astroid hooks for numpy.core.umath module."""
-from astroid import nodes
 from astroid.brain.helpers import register_module_extender
 from astroid.builder import parse
 from astroid.manager import AstroidManager
 
 
-def numpy_core_umath_transform() -> nodes.Module:
+def numpy_core_umath_transform():
     ufunc_optional_keyword_arguments = (
         """out=None, where=True, casting='same_kind', order='K', """
         """dtype=None, subok=True"""
@@ -150,5 +149,6 @@ def numpy_core_umath_transform() -> nodes.Module:
     )
 
 
-def register(manager: AstroidManager) -> None:
-    register_module_extender(manager, "numpy.core.umath", numpy_core_umath_transform)
+register_module_extender(
+    AstroidManager(), "numpy.core.umath", numpy_core_umath_transform
+)

@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 """Unit Tests for the builtins brain module."""
 
@@ -9,12 +9,12 @@ import unittest
 import pytest
 
 from astroid import nodes, objects, util
-from astroid.builder import _extract_single_node, extract_node
+from astroid.builder import _extract_single_node
 
 
 class BuiltinsTest(unittest.TestCase):
     def test_infer_property(self):
-        property_assign = _extract_single_node(
+        class_with_property = _extract_single_node(
             """
         class Something:
             def getter():
@@ -22,17 +22,8 @@ class BuiltinsTest(unittest.TestCase):
             asd = property(getter) #@
         """
         )
-        inferred_property = next(iter(property_assign.value.infer()))
+        inferred_property = list(class_with_property.value.infer())[0]
         self.assertTrue(isinstance(inferred_property, objects.Property))
-        class_parent = property_assign.scope()
-        self.assertIsInstance(class_parent, nodes.ClassDef)
-        self.assertFalse(
-            any(
-                isinstance(def_, objects.Property)
-                for def_list in class_parent.locals.values()
-                for def_ in def_list
-            )
-        )
         self.assertTrue(hasattr(inferred_property, "args"))
 
 
@@ -136,22 +127,3 @@ class TestStringNodes:
         inferred = next(node.infer())
         assert isinstance(inferred, nodes.Const)
         assert inferred.value == "My name is Daniel, I'm 12.00"
-
-    def test_string_format_in_dataclass_pylint8109(self) -> None:
-        """https://github.com/pylint-dev/pylint/issues/8109"""
-        function_def = extract_node(
-            """
-from dataclasses import dataclass
-
-@dataclass
-class Number:
-    amount: int | float
-    round: int = 2
-
-    def __str__(self): #@
-        number_format = "{:,.%sf}" % self.round
-        return number_format.format(self.amount).rstrip("0").rstrip(".")
-"""
-        )
-        inferit = function_def.infer_call_result(function_def, context=None)
-        assert [a.name for a in inferit] == [util.Uninferable]

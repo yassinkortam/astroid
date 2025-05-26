@@ -1,8 +1,4 @@
 {
-  "134317971+correctmost@users.noreply.github.com": {
-    "mails": ["134317971+correctmost@users.noreply.github.com"],
-    "name": "correctmost"
-  },
   "13665637+DanielNoord@users.noreply.github.com": {
     "mails": ["13665637+DanielNoord@users.noreply.github.com"],
     "name": "Daniël van Noord",
@@ -22,36 +18,17 @@
     "name": "Mark Byrne",
     "team": "Maintainers"
   },
-  "44875844+temyurchenko@users.noreply.github.com": {
-    "mails": [
-      "artemyurchenko@zoho.com",
-      "44875844+temyurchenko@users.noreply.github.com"
-    ],
-    "name": "Artem Yurchenko"
-  },
   "55152140+jayaddison@users.noreply.github.com": {
     "mails": ["55152140+jayaddison@users.noreply.github.com", "jay@jp-hosting.net"],
     "name": "James Addison"
-  },
-  "Hnasar@users.noreply.github.com": {
-    "mails": ["Hnasar@users.noreply.github.com", "hashem@hudson-trading.com"],
-    "name": "Hashem Nasarat"
   },
   "adam.grant.hendry@gmail.com": {
     "mails": ["adam.grant.hendry@gmail.com"],
     "name": "Adam Hendry"
   },
-  "akhil.kamat@gmail.com": {
-    "mails": ["akhil.kamat@gmail.com"],
-    "name": "Akhil Kamat"
-  },
   "androwiiid@gmail.com": {
     "mails": ["androwiiid@gmail.com"],
     "name": "Paligot Gérard"
-  },
-  "antonio@zoftko.com": {
-    "mails": ["antonio@zoftko.com", "antonioglez-23@hotmail.com"],
-    "name": "Antonio"
   },
   "areveny@protonmail.com": {
     "mails": ["areveny@protonmail.com", "self@areveny.com"],
@@ -80,10 +57,6 @@
     "mails": ["bryce.paul.guinta@gmail.com", "bryce.guinta@protonmail.com"],
     "name": "Bryce Guinta",
     "team": "Maintainers"
-  },
-  "c.ringstrom@gmail.com": {
-    "mails": ["c.ringstrom@gmail.com"],
-    "name": "Charlie Ringström"
   },
   "calen.pennington@gmail.com": {
     "mails": ["cale@edx.org", "calen.pennington@gmail.com"],
@@ -117,7 +90,7 @@
     "name": "Jacob Bogdanov"
   },
   "jacobtylerwalls@gmail.com": {
-    "mails": ["jacobtylerwalls@gmail.com", "jwalls@fargeo.com"],
+    "mails": ["jacobtylerwalls@gmail.com"],
     "name": "Jacob Walls",
     "team": "Maintainers"
   },
@@ -191,13 +164,6 @@
     "mails": ["thenault@gmail.com", "sylvain.thenault@logilab.fr"],
     "name": "Sylvain Thénault",
     "team": "Ex-maintainers"
-  },
-  "tushar.sadhwani000@gmail.com": {
-    "mails": [
-      "tushar.sadhwani000@gmail.com",
-      "86737547+tushar-deepsource@users.noreply.github.com"
-    ],
-    "name": "Tushar Sadhwani"
   },
   "ville.skytta@iki.fi": {
     "mails": ["ville.skytta@iki.fi", "ville.skytta@upcloud.com"],

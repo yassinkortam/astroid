@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
 
 import logging
 
@@ -50,8 +50,10 @@ from bump_changelog import (
 )
 def test_get_next_version(version, version_type, expected_version, expected_versions):
     assert get_next_version(version, version_type) == expected_version
-    if version_type == VersionType.PATCH or (
-        version_type == VersionType.MINOR and version.endswith(".0")
+    if (
+        version_type == VersionType.PATCH
+        or version_type == VersionType.MINOR
+        and version.endswith(".0")
     ):
         assert get_next_versions(version, version_type) == expected_versions
 
