@@ -34,6 +34,13 @@ from pathlib import Path
 from astroid.const import IS_JYTHON, IS_PYPY
 from astroid.interpreter._import import spec, util
 
+try:  # Python >= 3.10
+    from sys import stdlib_module_names as _stdlib_module_names
+except ImportError:  # pragma: no cover - Python < 3.10
+    from ._backport_stdlib_names import (
+        stdlib_module_names as _stdlib_module_names,
+    )
+
 logger = logging.getLogger(__name__)
 
 
@@ -524,23 +531,26 @@ def is_standard_module(modname: str, std_path: Iterable[str] | None = None) -> b
       - is a built-in module
     """
     modname = modname.split(".")[0]
+    if std_path is None:
+        return modname in _stdlib_module_names
+
     try:
         filename = file_from_modpath([modname])
     except ImportError:
-        # import failed, i'm probably not so wrong by supposing it's
+        # import failed, I'm probably not so wrong by supposing it's
         # not standard...
         return False
+
     # modules which are not living in a file are considered standard
-    # (sys and __builtin__ for instance)
+    # (sys and builtins for instance)
     if filename is None:
         # we assume there are no namespaces in stdlib
         return not util.is_namespace(modname)
+
     filename = _normalize_path(filename)
     for path in EXT_LIB_DIRS:
         if filename.startswith(_cache_normalize_path(path)):
             return False
-    if std_path is None:
-        std_path = STD_LIB_DIRS
 
     return any(filename.startswith(_cache_normalize_path(path)) for path in std_path)
 
